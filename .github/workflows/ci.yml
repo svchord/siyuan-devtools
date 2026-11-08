@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows 必须进矩阵：命令层用 spawnSync 调 playwright-cli，
+        # 路径分隔符与进程退出码在两端行为不同。
+        os: [ubuntu-latest, windows-latest]
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 12.14.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run check
+      - run: pnpm run build
+
+      # 产物冒烟：这些命令不需要浏览器，能验证编译后的 import 路径、
+      # shebang 与 bin 入口都是可运行的（tsc 通过不等于 dist 能跑）。
+      - name: Smoke test built CLI
+        shell: bash
+        run: |
+          node dist/cli.js --help > /dev/null
+          node dist/cli.js read contrast '#000' '#fff' --json
