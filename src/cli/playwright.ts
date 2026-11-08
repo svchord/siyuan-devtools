@@ -17,24 +17,30 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { UserError } from './support.ts';
 
-/** 找到 playwright-core 自带的 cli.js。 */
-function cliPath(): string {
-  const require = createRequire(import.meta.url);
+/**
+ * 找到 playwright-core 自带的 cli.js。
+ *
+ * 不能直接 `resolve('playwright-core/cli.js')`：playwright-core 的 `exports`
+ * 没有导出 `./cli.js`，会报 ERR_PACKAGE_PATH_NOT_EXPORTED。开发仓库里之所以
+ * 看起来能用，是因为包根目录恰好就是 node_modules/playwright-core —— 装成
+ * 依赖后那条路径根本不存在。
+ *
+ * 唯一稳定做法：解析被允许导出的 `playwright-core/package.json`，再从它旁边
+ * 取 `cli.js`。这样不管装在 node_modules 还是 pnpm 的 .pnpm 链接里都对。
+ */
+export function cliPath(): string {
   const candidates = [
-    // 从本包位置解析
-    () => require.resolve('playwright-core/cli.js'),
-    // 从运行 CLI 的项目位置解析
-    () => createRequire(join(process.cwd(), 'package.json')).resolve('playwright-core/cli.js'),
-    // 直接从本包目录下找
-    () => join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'node_modules', 'playwright-core', 'cli.js'),
+    // 从本包位置解析（正常情况：playwright-core 是直接依赖）
+    () => createRequire(import.meta.url).resolve('playwright-core/package.json'),
+    // 从运行 CLI 的项目位置解析（本包被 npm link 或提升安装时的兜底）
+    () => createRequire(join(process.cwd(), 'package.json')).resolve('playwright-core/package.json'),
   ];
   for (const resolve of candidates) {
     try {
-      const path = resolve();
-      if (existsSync(path)) return path;
+      const cli = join(dirname(resolve()), 'cli.js');
+      if (existsSync(cli)) return cli;
     } catch {
       // 换下一个
     }
