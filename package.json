@@ -1,0 +1,51 @@
+{
+  "name": "siyuan-devtools",
+  "version": "0.1.0",
+  "description": "Agent-facing CLI for measuring real SiYuan theme/plugin rendering",
+  "keywords": [
+    "siyuan",
+    "siyuan-theme",
+    "devtools",
+    "playwright",
+    "cli",
+    "agent"
+  ],
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "bin": {
+    "siyuan-devtools": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "skills"
+  ],
+  "scripts": {
+    "clean": "node --input-type=module -e \"import fs from 'node:fs'; fs.rmSync('dist',{recursive:true,force:true})\"",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "check": "pnpm run type-check && pnpm run test"
+  },
+  "dependencies": {
+    "commander": "^15.1.0",
+    "playwright-core": "^1.65.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/svchord/siyuan-devtools.git"
+  },
+  "author": "svchord",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
