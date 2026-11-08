@@ -12,6 +12,7 @@
   ],
   "type": "module",
   "license": "MIT",
+  "packageManager": "pnpm@12.14.0",
   "engines": {
     "node": ">=22.18.0"
   },
@@ -42,6 +43,10 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/svchord/siyuan-devtools.git"
+  },
+  "homepage": "https://github.com/svchord/siyuan-devtools#readme",
+  "bugs": {
+    "url": "https://github.com/svchord/siyuan-devtools/issues"
   },
   "author": "svchord",
   "publishConfig": {

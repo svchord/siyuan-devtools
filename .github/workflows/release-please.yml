@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 顶层清空，权限按 job 显式授予（release-please 需要的三样缺一不可）
+permissions: {}
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # 建 release commit / tag / GitHub Release
+      pull-requests: write # 开 Release PR
+      id-token: write # OIDC trusted publishing
+
+    steps:
+      # ① 每次 push 到 main 都会跑：有已合并的 Release PR 就建 tag+Release，否则开/更新 Release PR
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # ② 以下每一步都只在「这次 push 刚好合并了 Release PR」时执行
+      #    普通 push 时 release_created 为空，全部 skip
+      - uses: actions/checkout@v6
+        if: ${{ steps.release.outputs.release_created }}
+      - uses: pnpm/action-setup@v6
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          version: 12.14.0
+      - uses: actions/setup-node@v6
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        if: ${{ steps.release.outputs.release_created }}
+      # 发布前再跑一遍完整校验，避免把红着的代码发出去
+      - run: pnpm run check
+        if: ${{ steps.release.outputs.release_created }}
+      - run: pnpm run build
+        if: ${{ steps.release.outputs.release_created }}
+      # 只 stage，不直接发布：版本进入 npm 的暂存区，需要维护者在
+      # npmjs.com 用安全密钥（WebAuthn）批准后才真正上线。
+      # 这样即使 CI 被攻破、或红色 Release PR 被误合并，包也不会自动发出。
+      #
+      # 前提：npm 上该包的 trusted publisher 只勾 "npm stage publish"，
+      # 不要勾 "npm publish"。少了这个前提，CI 会 403。
+      - run: pnpm stage publish --access public --no-git-checks
+        if: ${{ steps.release.outputs.release_created }}
+        # 若遇到 "OIDC token exchange ... 404"（npm/cli#9969，新建仓库的
+        # immutable subject claim），再解开下面两行，用 granular token 兜底。
+        # 注意：兜底 token 也必须允许 stage（不带 bypass 2FA 的 GAT 即可）。
+        # env:
+        #   NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
