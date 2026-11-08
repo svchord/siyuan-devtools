@@ -84,3 +84,44 @@ npx siyuan-devtools install --skills    # 给 agent 装一页 skill
 
 - `0` 成功
 - `2` 失败（错误信息在 stderr）
+
+## 参与开发
+
+### 提 PR
+
+1. PR 标题必须符合 [Conventional Commits](https://www.conventionalcommits.org/)——CI 会检查：
+   - `feat: ...` → 次版本（0.2.0）
+   - `fix: ...` → 补丁版本（0.1.1）
+   - `feat!: ...` → 1.0 之前只升次版本
+   - `docs:` / `chore:` / `ci:` / `test:` / `refactor:` → 不发版
+2. 合并方式固定为 **Squash and merge**，PR 标题会成为最终 commit。
+
+### 发布流程
+
+用 [release-please](https://github.com/googleapis/release-please) 自动管理版本，仓库里不手写版本号：
+
+```
+普通 PR 合入 main
+  └─ release-please 开/更新 Release PR「chore(main): release x.y.z」
+       └─ 合并该 PR
+            ├─ 自动打 tag、建 GitHub Release、生成 CHANGELOG.md
+            └─ pnpm stage publish → 版本进 npm 暂存区
+                 └─ 维护者在 npmjs.com 用安全密钥（WebAuthn）批准后才真正上线
+```
+
+`package.json` 的 `version` 由 Release PR 更新，不要手动改。
+
+CI 只 **stage** 不直接发布，所以即使 CI 被攻破、或红色 Release PR 被误合并，包也不会自动发出。
+
+### 发布故障排查
+
+- **`OIDC token exchange ... 404`**：见 [npm/cli#9969](https://github.com/npm/cli/issues/9969)，
+  影响 2026-07-15 之后创建的仓库（本仓库在内）。若遇到，只能用 granular token 兜底：
+  解开 `release-please.yml` 里注释掉的 `NODE_AUTH_TOKEN`，**同时**给 `setup-node`
+  加上 `registry-url: https://registry.npmjs.org`——少了 `registry-url`，
+  `actions/setup-node` 不会生成 `.npmrc`，`NODE_AUTH_TOKEN` 没有任何东西去读它，
+  兜底会静默失效。注意 token 兜底与 npm 的「disallow tokens」加固互斥。
+- **`ENEEDAUTH` / `404`**：通常是 trusted publisher 的仓库名、workflow 文件名
+  大小写不匹配，或 `package.json` 的 `repository.url` 与 GitHub 仓库不一致。
+- 不要用 `npm whoami` 验证 trusted publishing，它不检查发布权限；
+  用实际的 stage 操作验证。

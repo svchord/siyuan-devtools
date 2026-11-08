@@ -44,3 +44,25 @@ jobs:
         run: |
           node dist/cli.js --help > /dev/null
           node dist/cli.js read contrast '#000' '#fff' --json
+
+      # 安装态冒烟：上面那步在仓库里跑，仓库的 node_modules 布局和用户装下来
+      # 的不一样。曾经 cliPath() 用 require.resolve('playwright-core/cli.js')，
+      # 仓库里恰好能解析到，装成依赖后必然失败（playwright-core 的 exports
+      # 没有导出 ./cli.js）。这里打 tarball 装进空目录再跑，才能覆盖真实布局。
+      #
+      # 只在 Linux 跑：查的是 npm 的安装布局，与操作系统无关；而 Windows 上
+      # `shell: bash` 是 Git Bash，$RUNNER_TEMP 是 `D:\a\_temp` 这种 Windows
+      # 路径，混用会解析失败。Windows 的行为差异由上面的测试矩阵覆盖。
+      - name: Smoke test installed package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg=$(npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -n 1)
+          mkdir -p "$RUNNER_TEMP/consumer"
+          cd "$RUNNER_TEMP/consumer"
+          npm init -y > /dev/null
+          npm install "$RUNNER_TEMP/$pkg" --no-audit --no-fund > /dev/null
+          # status 不需要浏览器，但会走 cliPath() 定位 playwright-core cli。
+          # 定位失败会以退出码 2 报「找不到 playwright-core」。
+          node node_modules/siyuan-devtools/dist/cli.js status --json
