@@ -39,12 +39,28 @@ export const ENV_FN = `() => {
   };
 }`;
 
-/** 令牌读数：函数体，参数由调用方传。 */
+/**
+ * 令牌读数：函数体，参数由调用方传。
+ *
+ * `getPropertyValue` 对未定义的自定义属性返回空字符串，和「定义了但值为空」
+ * 无法区分。agent 最常犯的错就是令牌名拼错，若静默返回 ""，它会当成
+ * 「这个令牌没有值」继续往下走。所以这里先枚举已定义的属性名，未命中的
+ * 单独放进 missing，让调用方能明确区分两种情况。
+ */
 export const TOKENS_FN = `names => {
   const root = getComputedStyle(document.documentElement);
-  const out = {};
-  for (const name of names) out[name] = root.getPropertyValue(name).trim();
-  return out;
+  const defined = new Set();
+  for (let i = 0; i < root.length; i += 1) {
+    const name = root[i];
+    if (name.startsWith('--')) defined.add(name);
+  }
+  const values = {};
+  const missing = [];
+  for (const name of names) {
+    if (defined.has(name)) values[name] = root.getPropertyValue(name).trim();
+    else missing.push(name);
+  }
+  return { values, missing };
 }`;
 
 /** 对比度读数：令牌名或字面量颜色都可以，对比度本身在 Node 侧算。 */

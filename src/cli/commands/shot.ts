@@ -17,7 +17,7 @@ import { sleep, UserError } from '../support.ts';
 import { frontendUrl, parseFrontend } from '../url.ts';
 import type { Frontend } from '../url.ts';
 import { viewportFor } from '../viewport.ts';
-import { applyViewport, captureRootSnapshot, requireSession, waitForReady } from './session.ts';
+import { applyViewport, captureRootSnapshot, deviceArgsFor, requireSession, waitForReady } from './session.ts';
 
 /** 两个维度各自的属性名与合法取值。 */
 export const DIMENSIONS = {
@@ -56,8 +56,12 @@ export async function shot(argv: string[], url: string | null, json: boolean): P
   mkdirSync(outDir, { recursive: true });
   const files: string[] = [];
   for (const frontend of frontends) {
+    // 设备模拟（--device）只能在 open 时指定，改不了已有会话。所以每换一个
+    // 前端就重开浏览器：否则 mobile 那一轮会沿用 desktop 的 dpr 与 UA，
+    // min-resolution / pointer 之类的媒体查询全部走错分支。
+    // open 会杀掉旧 Chrome 起新的（见 session.ts 的说明），无需先 close。
+    runCli(['open', '--browser=chrome', ...deviceArgsFor(frontend), frontendUrl(frontend, url)]);
     applyViewport(viewportFor(frontend));
-    runCli(['goto', frontendUrl(frontend, url)]);
     await waitForReady();
     await captureRootSnapshot();
     const assignments: Array<[string, string]> = [];
@@ -72,7 +76,9 @@ export async function shot(argv: string[], url: string | null, json: boolean): P
       await sleep(200);
     }
     const file = join(outDir, `${frontend}${suffix ? `-${suffix}` : ''}.png`);
-    runCli(['screenshot', `--filename=${file}`]);
+    // --hires 按设备像素截图（计入 dpr）。不加的话 mobile 仍输出 390x844 的
+    // CSS 像素图，在真机 3x 屏上相当于把 1170x2532 压缩了三分之一。
+    runCli(['screenshot', '--hires', `--filename=${file}`]);
     files.push(file);
   }
   output(json ? files : files.join('\n'), json);

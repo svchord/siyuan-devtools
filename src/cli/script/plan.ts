@@ -69,7 +69,14 @@ function compileStep(step: PlanStep, index: number): string {
     return `${push}await page.evaluate(${ENV_FN}) });`;
   }
   if (step.read === 'tokens') {
-    return `${push}await page.evaluate(${TOKENS_FN}, ${JSON.stringify(step.names ?? [])}) });`;
+    // 与 read tokens 同一套严格语义：拼错的令牌名在计划里也要直接失败，
+    // 不能把 missing 静默带进结果。
+    const tokensVar = `tokens${index}`;
+    return (
+      `const ${tokensVar} = await page.evaluate(${TOKENS_FN}, ${JSON.stringify(step.names ?? [])}); ` +
+      `if (${tokensVar}.missing.length) throw new Error('未定义的 CSS 变量：' + ${tokensVar}.missing.join('、')); ` +
+      `${push}${tokensVar}.values });`
+    );
   }
   if (step.read === 'element') {
     const fn = elementFn(step.selector ?? '', step.props ?? ['color', 'background-color'], step.box ?? false, step.limit ?? 5);

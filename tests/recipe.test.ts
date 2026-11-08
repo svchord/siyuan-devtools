@@ -56,6 +56,22 @@ describe('element 片段', () => {
   });
 });
 
+describe('tokens 片段', () => {
+  it('区分「未定义」与「定义了但值为空」', () => {
+    // getPropertyValue 对未定义变量返回 ""，若不额外枚举属性名就无法区分，
+    // agent 会把拼错的令牌名当成「没有值」继续用。
+    expect(TOKENS_FN).toContain('missing');
+    expect(TOKENS_FN).toContain('defined');
+  });
+
+  it('返回 values 与 missing 两个字段', () => {
+    const source = TOKENS_FN;
+    expect(source).toContain('values');
+    expect(source).toContain('missing');
+    expect(source).not.toMatch(/return\s+out\s*;/);
+  });
+});
+
 describe('动作片段', () => {
   it('menu 使用 data-id 且不会先关闭当前菜单', () => {
     expect(MENU_FN).toContain('data-id');

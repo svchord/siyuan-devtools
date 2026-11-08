@@ -5,7 +5,7 @@ import { runCli, sessionExists } from '../playwright.ts';
 import { UserError } from '../support.ts';
 import { frontendUrl } from '../url.ts';
 import { parseViewport, viewportFor } from '../viewport.ts';
-import { applyViewport, captureRootSnapshot, waitForReady } from './session.ts';
+import { applyViewport, captureRootSnapshot, deviceArgsFor, waitForReady } from './session.ts';
 
 /** audit 是唯一自动创建会话的命令（计划里已声明 frontend）。 */
 export async function audit(args: string[], json: boolean, url: string | null): Promise<void> {
@@ -15,7 +15,9 @@ export async function audit(args: string[], json: boolean, url: string | null): 
 
   const targetUrl = frontendUrl(plan.frontend, url);
   if (!sessionExists()) {
-    runCli(['open', '--browser=chrome', targetUrl]);
+    // 与 session.ts 的 open 走同一套设备参数：mobile 必须模拟真机，
+    // 否则 dpr 停在 1，min-resolution / pointer 等媒体查询不会命中。
+    runCli(['open', '--browser=chrome', ...deviceArgsFor(plan.frontend), targetUrl]);
   } else {
     // 计划声明了 frontend：已有会话也要导航到对应入口，不能沿用别的页面。
     runCli(['goto', targetUrl]);

@@ -76,7 +76,14 @@ export async function doAction(argv: string[], json: boolean): Promise<void> {
       output({ ok: true }, json);
       return;
     }
-    if (!selector) throw new UserError(`do ${action} 需要选择器`);
+    if (!selector) {
+      // press/keydown/keyup 的第一个参数是按键名（Enter、Shift…），不是选择器。
+      throw new UserError(
+        action === 'press' || action === 'keydown' || action === 'keyup'
+          ? `do ${action} 需要按键名，如 Enter`
+          : `do ${action} 需要选择器`
+      );
+    }
     if (button && action !== 'click' && action !== 'dblclick') {
       throw new UserError(`--button 只支持 click / dblclick：${action}`);
     }

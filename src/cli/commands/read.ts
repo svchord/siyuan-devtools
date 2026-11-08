@@ -39,7 +39,13 @@ export function read(argv: string[], json: boolean): void {
   if (sub === 'tokens') {
     const names = rest.filter((token) => token.startsWith('--'));
     if (!names.length) throw new UserError('read tokens 需要至少一个令牌名，如 --brand-8');
-    output(evalScript(evalExpr(TOKENS_FN, names)), json);
+    const result = evalScript(evalExpr(TOKENS_FN, names)) as { values: Record<string, string>; missing: string[] };
+    // 拼错的令牌名必须报错，不能静默返回空字符串——否则 agent 会当成
+    // 「这个令牌没有值」继续往下走，把错误带进最终结论。
+    if (result.missing.length) {
+      throw new UserError(`未定义的 CSS 变量：${result.missing.join('、')}`);
+    }
+    output(result.values, json);
     return;
   }
 

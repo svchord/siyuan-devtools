@@ -69,6 +69,21 @@ function currentFrontend(): Frontend | null {
   return null;
 }
 
+/**
+ * 前端对应的默认模拟设备。
+ *
+ * 只设视口尺寸是不够的：真实移动端的 dpr 是 3，UA 也是移动端。
+ * 少了设备模拟，`@media (min-resolution: 2dppx)`、`pointer: coarse`
+ * 以及依赖 UA 的样式分支都不会生效，测出来的不是真实移动端。
+ */
+const MOBILE_DEVICE = 'iPhone 13';
+
+/** 打开浏览器时要带上的设备模拟参数（desktop 不需要）。 */
+export function deviceArgsFor(frontend: Frontend, device: string | null = null): string[] {
+  if (device) return [`--device=${device}`];
+  return frontend === 'mobile' ? [`--device=${MOBILE_DEVICE}`] : [];
+}
+
 export async function open(argv: string[], url: string | null): Promise<void> {
   const parsed = parseArgs(argv, {
     valueFlags: ['--frontend', '--device', '--viewport'],
@@ -79,9 +94,7 @@ export async function open(argv: string[], url: string | null): Promise<void> {
   const device = lastValue(parsed, '--device');
   const viewportRaw = lastValue(parsed, '--viewport');
   const viewport = viewportRaw === undefined ? null : parseViewport(viewportRaw);
-  const args = ['open', '--browser=chrome'];
-  if (device) args.push(`--device=${device}`);
-  else if (frontend === 'mobile') args.push('--device=iPhone 13');
+  const args = ['open', '--browser=chrome', ...deviceArgsFor(frontend, device ?? null)];
   if (parsed.flags.has('--headed')) args.push('--headed');
   args.push(frontendUrl(frontend, url));
   runCli(args);
