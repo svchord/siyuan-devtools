@@ -13,13 +13,14 @@ import { join } from 'node:path';
 import { lastValue, parseArgs } from '../args.ts';
 import { output } from '../format.ts';
 import { runCli } from '../playwright.ts';
-import { UserError } from '../support.ts';
+import { sleep, UserError } from '../support.ts';
 import { frontendUrl, parseFrontend } from '../url.ts';
 import type { Frontend } from '../url.ts';
-import { requireSession } from './session.ts';
+import { viewportFor } from '../viewport.ts';
+import { applyViewport, captureRootSnapshot, requireSession, waitForReady } from './session.ts';
 
 /** 两个维度各自的属性名与合法取值。 */
-const DIMENSIONS = {
+export const DIMENSIONS = {
   '--theme': { attribute: 'data-theme-mode', values: ['dark', 'light'] },
   '--density': { attribute: 'data-ui-density', values: ['comfortable', 'compact'] },
 } as const;
@@ -27,7 +28,7 @@ const DIMENSIONS = {
 type DimensionFlag = keyof typeof DIMENSIONS;
 
 /** 校验某个维度的取值；拼错时列出可用值。 */
-function parseDimension(flag: DimensionFlag, raw: string | undefined): string | null {
+export function parseDimension(flag: DimensionFlag, raw: string | undefined): string | null {
   if (raw === undefined) return null;
   const { values } = DIMENSIONS[flag];
   if (!(values as readonly string[]).includes(raw)) {
@@ -36,17 +37,18 @@ function parseDimension(flag: DimensionFlag, raw: string | undefined): string | 
   return raw;
 }
 
-export function shot(argv: string[], url: string | null, json: boolean): void {
+export async function shot(argv: string[], url: string | null, json: boolean): Promise<void> {
   const parsed = parseArgs(argv, {
     valueFlags: ['--frontend', '--theme', '--density', '--out'],
     booleanFlags: [],
+    allowUnknown: false,
   });
-  requireSession();
   const outDir = lastValue(parsed, '--out') ?? 'shots';
   const theme = parseDimension('--theme', lastValue(parsed, '--theme'));
   const density = parseDimension('--density', lastValue(parsed, '--density'));
   const which = lastValue(parsed, '--frontend') ?? 'both';
   const frontends: Frontend[] = which === 'both' ? ['desktop', 'mobile'] : [parseFrontend(which)];
+  requireSession();
 
   // 文件名带上生效的维度，两种组合不会互相覆盖。
   const suffix = [theme, density].filter(Boolean).join('-');
@@ -54,7 +56,10 @@ export function shot(argv: string[], url: string | null, json: boolean): void {
   mkdirSync(outDir, { recursive: true });
   const files: string[] = [];
   for (const frontend of frontends) {
+    applyViewport(viewportFor(frontend));
     runCli(['goto', frontendUrl(frontend, url)]);
+    await waitForReady();
+    await captureRootSnapshot();
     const assignments: Array<[string, string]> = [];
     if (theme) assignments.push([DIMENSIONS['--theme'].attribute, theme]);
     if (density) assignments.push([DIMENSIONS['--density'].attribute, density]);
@@ -63,6 +68,8 @@ export function shot(argv: string[], url: string | null, json: boolean): void {
         .map(([attribute, value]) => `document.documentElement.setAttribute(${JSON.stringify(attribute)}, ${JSON.stringify(value)});`)
         .join(' ');
       runCli(['eval', `(() => { ${body} return true; })()`]);
+      // 给主题 CSS/过渡一帧以上时间；否则可能截到切换中的状态。
+      await sleep(200);
     }
     const file = join(outDir, `${frontend}${suffix ? `-${suffix}` : ''}.png`);
     runCli(['screenshot', `--filename=${file}`]);

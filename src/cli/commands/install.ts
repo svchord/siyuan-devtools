@@ -10,7 +10,7 @@ import { parseArgs } from '../args.ts';
 import { UserError } from '../support.ts';
 
 export function install(argv: string[]): void {
-  const parsed = parseArgs(argv, { valueFlags: [], booleanFlags: ['--skills', '--global'] });
+  const parsed = parseArgs(argv, { valueFlags: [], booleanFlags: ['--skills', '--global'], allowUnknown: false });
   if (!parsed.flags.has('--skills')) throw new UserError('目前只支持 install --skills');
   const here = dirname(fileURLToPath(import.meta.url));
   const source = join(here, '..', '..', '..', 'skills', 'siyuan-devtools', 'SKILL.md');

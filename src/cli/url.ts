@@ -2,7 +2,7 @@
 
 export type Frontend = 'desktop' | 'mobile';
 
-/** 拼前端入口；不做 port.json / PID / 多实例探活（那是插件包的职责）。 */
+/** 拼前端入口；本包只使用 SIYUAN_PORT / --url，不做 port.json / PID / 多实例探活。 */
 export function frontendUrl(frontend: Frontend, explicitUrl: string | null = null): string {
   if (explicitUrl) return explicitUrl;
   const port = process.env.SIYUAN_PORT?.trim() || '6806';

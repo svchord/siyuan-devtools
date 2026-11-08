@@ -7,6 +7,7 @@
  * 会被 zod 静默剥掉，读数退回默认值、报告却显示成功——这正是要防的静默失败。
  */
 import { z } from 'zod';
+import { parseViewport } from '../viewport.ts';
 
 const stringArray = (label: string) =>
   z.array(z.string({ error: `${label}[i] 必须是字符串` }), { error: `${label} 必须是数组` });
@@ -18,7 +19,7 @@ const stepShape = z
     do: z.string({ error: 'do 必须是字符串，如 "menu:theme"' }).optional(),
     diff: z
       .object({
-        selector: z.string({ error: 'diff.selector 必须是字符串' }),
+        selector: z.string({ error: 'diff.selector 必须是字符串' }).min(1, { error: 'diff.selector 不能为空' }),
         props: stringArray('diff.props'),
       })
       .strict()
@@ -32,6 +33,33 @@ const stepShape = z
     limit: z.number({ error: 'limit 必须是数字' }).int({ error: 'limit 必须是整数' }).positive({ error: 'limit 必须大于 0' }).optional(),
   })
   .strict()
+  .superRefine((step, ctx) => {
+    if (step.read === 'element' && !step.selector?.trim()) {
+      ctx.addIssue({ code: 'custom', path: ['selector'], message: 'read element 需要 selector' });
+    }
+    if (step.read === 'tokens' && !step.names?.length) {
+      ctx.addIssue({ code: 'custom', path: ['names'], message: 'read tokens 需要至少一个 names' });
+    }
+    if (step.read === 'contrast') {
+      if (!step.foreground?.trim()) {
+        ctx.addIssue({ code: 'custom', path: ['foreground'], message: 'read contrast 需要 foreground' });
+      }
+      if (!step.background?.trim()) {
+        ctx.addIssue({ code: 'custom', path: ['background'], message: 'read contrast 需要 background' });
+      }
+    }
+    if (step.do !== undefined) {
+      if (!/^(?:hover|click|menu):.+/s.test(step.do)) {
+        ctx.addIssue({ code: 'custom', path: ['do'], message: 'do 必须是 hover:<selector> / click:<selector> / menu:<id>' });
+      }
+    }
+    if (step.diff && step.do === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['diff'], message: 'diff 只能用于 do 步骤' });
+    }
+    if ((step.box !== undefined || step.limit !== undefined) && step.read !== 'element') {
+      ctx.addIssue({ code: 'custom', message: 'box / limit 只能用于 read element' });
+    }
+  })
   .refine((step) => step.read !== undefined || step.do !== undefined, {
     error: '每一步必须有 read 或 do',
   })
@@ -43,7 +71,20 @@ const stepShape = z
 export const planShape = z
   .object({
     frontend: z.enum(['desktop', 'mobile'], { error: 'frontend 必须是 desktop 或 mobile' }),
-    viewport: z.string({ error: 'viewport 必须是字符串，如 "390x844"' }).optional(),
+    viewport: z
+      .string({ error: 'viewport 必须是字符串，如 "390x844"' })
+      .refine(
+        (value) => {
+          try {
+            parseViewport(value);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        { error: 'viewport 必须是正整数的 宽x高，如 "390x844"' }
+      )
+      .optional(),
     steps: z.array(stepShape, { error: 'steps 必须是数组' }).min(1, { error: 'steps 不能为空' }),
   })
   .strict();

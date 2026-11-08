@@ -2,12 +2,26 @@
  * 页面 JS 片段：唯一定义处。
  *
  * 这些片段跑在页面里，不能引用 Node 侧的任何变量，所有常量内联进函数体。
- * `cli --raw eval` 与 `audit` 的 run-code 都从这里取，避免两处漂移。
+ * `cli --json eval` 与 `audit` 的 run-code 都从这里取，避免两处漂移。
  *
  * 片段分两种形状：
  *   - `evaluate(fn, arg)` 用：函数体字符串（如 `names => {...}`）
  *   - `eval "<expr>"` 用：自执行表达式（如 `(names => {...})([...])`）
  */
+
+/** 页面是否已经完成思源前端启动。 */
+export const READY_FN = `() => Boolean(
+  window.siyuan?.config &&
+  document.documentElement.getAttribute('data-frontend')
+)`;
+
+/** 记录会话开始时的 `<html>` 属性快照，供 reset 恢复。 */
+export const SNAPSHOT_ROOT_FN = `() => {
+  const attributes = {};
+  for (const attribute of document.documentElement.attributes) attributes[attribute.name] = attribute.value;
+  window.__siyuanDevtoolsRootAttrs = attributes;
+  return true;
+}`;
 
 /** `read env` / 计划的 env 步骤。 */
 export const ENV_FN = `() => {
@@ -33,11 +47,12 @@ export const TOKENS_FN = `names => {
   return out;
 }`;
 
-/** 对比度读数：读两个令牌的计算值，对比度本身在 Node 侧算。 */
+/** 对比度读数：令牌名或字面量颜色都可以，对比度本身在 Node 侧算。 */
 export const contrastFn = (fg: string, bg: string): string => `() => {
   const root = getComputedStyle(document.documentElement);
-  return { foreground: root.getPropertyValue(${JSON.stringify(fg)}).trim(),
-    background: root.getPropertyValue(${JSON.stringify(bg)}).trim() };
+  const read = (value) => value.startsWith('--') ? root.getPropertyValue(value).trim() : value;
+  return { foreground: read(${JSON.stringify(fg)}),
+    background: read(${JSON.stringify(bg)}) };
 }`;
 
 /** 可见性判定：position:fixed 元素的 offsetParent 恒 null，必须用 rect + computedStyle。 */
@@ -88,12 +103,28 @@ export const styleOfFn = (selector: string, props: string[]): string => `() => {
 // ---- 思源专用动作（都在页面 JS 内完成，不需要 page 对象）----
 
 export const MENU_FN = `id => {
-  const api = window.siyuan?.menus?.menu;
-  if (!api) return { ok: false, reason: 'siyuan.menus 不可用' };
-  api.remove();
-  const el = document.querySelector(\`[data-menu-id="\${id}"]\`);
-  if (el) el.click();
-  return { ok: true };
+  const escape = (value) => window.CSS?.escape
+    ? CSS.escape(String(value))
+    : String(value).replace(/["\\\\]/g, '\\\\$&');
+  const idText = String(id);
+  const selector = escape(idText);
+  const candidates = [
+    document.querySelector('[data-menu-id="' + selector + '"]'),
+    document.querySelector('#commonMenu .b3-menu__item[data-id="' + selector + '"]'),
+    document.querySelector('[data-menu="true"][data-id="' + selector + '"]'),
+    document.querySelector('[data-id="' + selector + '"]'),
+  ];
+  const element = candidates.find(Boolean);
+  if (element) {
+    element.click();
+    return { ok: true, id: idText };
+  }
+  const named = window.siyuan?.menus?.menu?.[idText];
+  if (named?.element) {
+    named.element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    return { ok: true, id: idText };
+  }
+  return { ok: false, reason: '找不到菜单项：' + idText };
 }`;
 
 export const DOCK_FN = `type => {
@@ -105,19 +136,30 @@ export const DOCK_FN = `type => {
 
 export const ATTR_FN = `pair => {
   const [name, value] = pair;
-  if (value === undefined) document.documentElement.removeAttribute(name);
+  if (value === undefined || value === null) document.documentElement.removeAttribute(name);
   else document.documentElement.setAttribute(name, value);
   return { ok: true, name, value: value ?? null };
 }`;
 
 export const RESET_FN = `() => {
+  const root = document.documentElement;
+  const snapshot = window.__siyuanDevtoolsRootAttrs;
+  if (snapshot && typeof snapshot === 'object') {
+    for (const name of [...root.getAttributeNames()]) {
+      if (!Object.prototype.hasOwnProperty.call(snapshot, name)) root.removeAttribute(name);
+    }
+    for (const [name, value] of Object.entries(snapshot)) {
+      if (root.getAttribute(name) !== value) root.setAttribute(name, value);
+    }
+  } else {
+    root.removeAttribute('data-theme-mode');
+    root.removeAttribute('data-ui-density');
+  }
   window.siyuan?.menus?.menu?.remove();
-  document.documentElement.removeAttribute('data-theme-mode');
-  document.documentElement.removeAttribute('data-ui-density');
-  return { ok: true };
+  return { ok: true, restored: Boolean(snapshot) };
 }`;
 
-/** 把「函数体 + 参数」包成给 `cli --raw eval` 用的自执行表达式。 */
+/** 把「函数体 + 参数」包成给 `cli --json eval` 用的自执行表达式。 */
 export function evalExpr(fn: string, arg?: unknown): string {
   return fn === '' ? '' : arg === undefined ? `(${fn})()` : `(${fn})(${JSON.stringify(arg)})`;
 }

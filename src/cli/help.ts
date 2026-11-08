@@ -2,9 +2,9 @@
 export const HELP = `siyuan-devtools — 思源主题/插件渲染测量
 
 会话
-  siyuan-devtools open [--frontend desktop|mobile] [--device "iPhone 13"] [--viewport 390x844]
-  siyuan-devtools reload
-  siyuan-devtools status
+  siyuan-devtools open [--frontend desktop|mobile] [--device "iPhone 13"] [--viewport 390x844] [--headed]
+  siyuan-devtools reload [--frontend desktop|mobile] [--viewport 390x844]
+  siyuan-devtools status [--json]
   siyuan-devtools close
 
 读数
@@ -13,7 +13,7 @@ export const HELP = `siyuan-devtools — 思源主题/插件渲染测量
   siyuan-devtools read element <selector> [--props a,b] [--box] [--limit N]
   siyuan-devtools read contrast <fg> <bg>
 
-动作（都支持 --diff a,b）
+动作（click/hover/dblclick/fill/drag/select 支持 --diff a,b）
   siyuan-devtools do click <selector> [--button left|right|middle] [--count 1|2]
   siyuan-devtools do hover <selector>
   siyuan-devtools do dblclick <selector>

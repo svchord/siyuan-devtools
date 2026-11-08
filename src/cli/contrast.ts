@@ -2,27 +2,81 @@
 
 /** 带透明度的颜色一律返回 null：静默丢掉 alpha 比报 null 更糟。 */
 function hasAlpha(text: string): boolean {
-  if (/^rgba?\(/i.test(text) || /^hsla\(/i.test(text)) {
+  if (/^rgba?\(/i.test(text) || /^hsla?\(/i.test(text)) {
     if (text.includes(',') && text.split(',').length > 3) return true;
   }
   if (text.includes('/')) return true;
   return text.startsWith('#') && (text.length === 5 || text.length === 9);
 }
 
+/** HSL → 0–255 RGB。 */
+function hslToRgb(hue: number, saturation: number, lightness: number): [number, number, number] {
+  const h = (((hue % 360) + 360) % 360) / 360;
+  const s = saturation / 100;
+  const l = lightness / 100;
+  if (s === 0) {
+    const value = Math.round(l * 255);
+    return [value, value, value];
+  }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const channel = (t: number): number => {
+    let value = t;
+    if (value < 0) value += 1;
+    if (value > 1) value -= 1;
+    if (value < 1 / 6) return p + (q - p) * 6 * value;
+    if (value < 1 / 2) return q;
+    if (value < 2 / 3) return p + (q - p) * (2 / 3 - value) * 6;
+    return p;
+  };
+  return [Math.round(channel(h + 1 / 3) * 255), Math.round(channel(h) * 255), Math.round(channel(h - 1 / 3) * 255)];
+}
+
 function parseColor(value: string): [number, number, number] | null {
   const text = value.trim();
   if (!text || hasAlpha(text)) return null;
+
   if (text.startsWith('#')) {
     const hex = text.slice(1);
-    if (hex.length === 3) return [...hex].map((c) => Number.parseInt(c + c, 16)) as [number, number, number];
-    if (hex.length === 6) return [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
+    if (hex.length === 3) {
+      const rgb = [...hex].map((c) => Number.parseInt(c + c, 16));
+      if (rgb.some((channel) => !Number.isFinite(channel))) return null;
+      return rgb as [number, number, number];
+    }
+    if (hex.length === 6) {
+      const rgb = [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
+      if (rgb.some((channel) => !Number.isFinite(channel))) return null;
+      return rgb as [number, number, number];
+    }
     return null;
   }
+
+  const hsl = /^hsla?\((.*)\)$/i.exec(text);
+  if (hsl) {
+    const parts = hsl[1]!.split(/[,\s/]+/).filter(Boolean);
+    if (parts.length !== 3) return null;
+    const hue = Number.parseFloat(parts[0]!);
+    const saturation = Number.parseFloat(parts[1]!);
+    const lightness = Number.parseFloat(parts[2]!);
+    if (![hue, saturation, lightness].every(Number.isFinite)) return null;
+    return hslToRgb(hue, saturation, lightness);
+  }
+
+  const rgb = /^rgba?\((.*)\)$/i.exec(text);
+  if (rgb) {
+    const parts = rgb[1]!.split(/[,\s]+/).filter(Boolean);
+    if (parts.length !== 3) return null;
+    const channels = parts.map((part) => (part.endsWith('%') ? (Number.parseFloat(part) / 100) * 255 : Number.parseFloat(part)));
+    if (!channels.every((channel) => Number.isFinite(channel) && channel >= 0 && channel <= 255)) return null;
+    return channels as [number, number, number];
+  }
+
+  // 兼容 "32 32 36" 这种不带函数名的裸三元组。
   const numbers = text.match(/[\d.]+/g);
   if (!numbers || numbers.length !== 3) return null;
-  const rgb = numbers.map(Number);
-  if (!rgb.every((channel) => Number.isFinite(channel) && channel >= 0 && channel <= 255)) return null;
-  return rgb as [number, number, number];
+  const channels = numbers.map(Number);
+  if (!channels.every((channel) => Number.isFinite(channel) && channel >= 0 && channel <= 255)) return null;
+  return channels as [number, number, number];
 }
 
 function luminance([r, g, b]: [number, number, number]): number {

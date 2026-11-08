@@ -61,6 +61,19 @@ describe('compilePlan', () => {
     expect(tokens).not.toContain('page.evaluate("names =>');
   });
 
+  it('diff 步骤生成 before/after，而不是被忽略', () => {
+    const source = compilePlan(PLAN);
+    expect(source).toContain('const before2');
+    expect(source).toContain('const after2');
+    expect(source).toContain('before: before2, after: after2');
+  });
+
+  it('read element 没传 props 时使用与 CLI 一致的默认属性', () => {
+    const source = compilePlan({ frontend: 'desktop', steps: [{ read: 'element', selector: '.x' }] });
+    expect(source).toContain('color');
+    expect(source).toContain('background-color');
+  });
+
   it('未知动作报错', () => {
     expect(() => compilePlan({ frontend: 'desktop', steps: [{ do: 'teleport:x' }] })).toThrow('不支持的动作');
   });

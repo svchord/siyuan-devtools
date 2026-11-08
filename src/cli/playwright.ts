@@ -13,7 +13,7 @@
  * 注意 `result` 是**字符串**，值本身还要再 `JSON.parse` 一次。
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -42,15 +42,31 @@ function cliPath(): string {
   throw new UserError('找不到 playwright-core；请安装：pnpm add -D siyuan-devtools');
 }
 
-/** 一条命令的结果。 */
-interface CliResult {
-  /** 完整 stdout（已 trim）。 */
-  out: string;
-  err: string;
+/**
+ * 给 Playwright CLI 一个工作区标记。
+ *
+ * Playwright CLI 用 `.playwright` 目录识别 workspace；找不到时会退回到
+ * playwright-core 包根目录作为 workspace。结果就是不同项目共用同一个
+ * `default` 会话——在 A 项目 open 会杀掉 B 项目的浏览器。这里保证当前
+ * 工作目录有标记，避免跨项目串会话。
+ */
+function ensureWorkspaceMarker(): void {
+  try {
+    mkdirSync(join(process.cwd(), '.playwright'), { recursive: true });
+  } catch {
+    // 只读目录等场景不能写标记；此时退回 Playwright 的默认行为，不让命令直接失败。
+  }
 }
 
-/** 执行一条 playwright-core cli 命令（不加额外输出开关）。 */
-export function runCli(args: string[]): CliResult {
+/** 一条命令的原始结果。 */
+interface RawCliResult {
+  out: string;
+  err: string;
+  status: number | null;
+}
+
+/** 执行一条 playwright-core cli 命令，保留退出码供 JSON 错误信封解析。 */
+function runCliRaw(args: string[]): RawCliResult {
   const result = spawnSync(process.execPath, [cliPath(), 'cli', ...args], {
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
@@ -58,8 +74,24 @@ export function runCli(args: string[]): CliResult {
   const out = (result.stdout ?? '').trim();
   const err = (result.stderr ?? '').trim();
   if (result.error) throw new UserError(`执行 playwright-cli 失败：${result.error.message}`);
-  if (result.status !== 0) throw new UserError(err || out || `playwright-cli 退出码 ${String(result.status)}`);
-  return { out, err };
+  return { out, err, status: result.status };
+}
+
+/** 一条命令的结果。 */
+export interface CliResult {
+  /** 完整 stdout（已 trim）。 */
+  out: string;
+  err: string;
+}
+
+/** 执行一条 playwright-core cli 命令（不加额外输出开关）。 */
+export function runCli(args: string[]): CliResult {
+  ensureWorkspaceMarker();
+  const result = runCliRaw(args);
+  if (result.status !== 0) {
+    throw new UserError(result.err || result.out || `playwright-cli 退出码 ${String(result.status)}`);
+  }
+  return { out: result.out, err: result.err };
 }
 
 /** `--json` 信封。 */
@@ -76,20 +108,37 @@ interface JsonEnvelope {
  * 值为空（页面返回 undefined）时 `result` 缺失，这里返回 null。
  */
 function runJson(args: string[]): unknown {
-  const { out } = runCli(['--json', ...args]);
+  ensureWorkspaceMarker();
+  const result = runCliRaw(['--json', ...args]);
   let envelope: JsonEnvelope;
   try {
-    envelope = JSON.parse(out) as JsonEnvelope;
+    envelope = JSON.parse(result.out) as JsonEnvelope;
   } catch {
-    throw new UserError(`playwright-cli 返回了非 JSON 输出：${out.slice(0, 200)}`);
+    if (result.status !== 0) {
+      throw new UserError(result.err || result.out || `playwright-cli 退出码 ${String(result.status)}`);
+    }
+    throw new UserError(`playwright-cli 返回了非 JSON 输出：${result.out.slice(0, 200)}`);
   }
   if (envelope.isError) throw new UserError(envelope.error ?? '页面执行出错');
+  if (result.status !== 0) {
+    throw new UserError(result.err || `playwright-cli 退出码 ${String(result.status)}`);
+  }
   if (envelope.result === undefined) return null;
   try {
     return JSON.parse(envelope.result);
   } catch {
     // result 不是 JSON 时按原文字符串返回（例如 `eval "1 + 2"`）。
     return envelope.result;
+  }
+}
+
+/** 结构化读取当前 workspace 的浏览器会话列表。 */
+export function listSessions(): unknown {
+  const { out } = runCli(['--json', 'list']);
+  try {
+    return JSON.parse(out) as unknown;
+  } catch {
+    throw new UserError(`playwright-cli 返回了非 JSON 输出：${out.slice(0, 200)}`);
   }
 }
 

@@ -25,12 +25,18 @@ function takeGlobals(argv: string[]): { json: boolean; url: string | null; rest:
       continue;
     }
     if (token === '--url') {
-      url = argv[i + 1] ?? null;
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith('--')) {
+        throw new UserError('--url 需要一个参数');
+      }
+      url = value;
       i += 1;
       continue;
     }
     if (token.startsWith('--url=')) {
-      url = token.slice('--url='.length);
+      const value = token.slice('--url='.length);
+      if (!value) throw new UserError('--url 需要一个参数');
+      url = value;
       continue;
     }
     rest.push(token);
@@ -51,10 +57,10 @@ export async function main(argv: string[]): Promise<number> {
       await open(args, url);
       return 0;
     case 'reload':
-      reload(args, url);
+      await reload(args, url);
       return 0;
     case 'status':
-      status();
+      status(json);
       return 0;
     case 'close':
       close();
@@ -63,13 +69,13 @@ export async function main(argv: string[]): Promise<number> {
       read(args, json);
       return 0;
     case 'do':
-      doAction(args, json);
+      await doAction(args, json);
       return 0;
     case 'audit':
-      audit(args, json, url);
+      await audit(args, json, url);
       return 0;
     case 'shot':
-      shot(args, url, json);
+      await shot(args, url, json);
       return 0;
     case 'install':
       install(args);

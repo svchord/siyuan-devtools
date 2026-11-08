@@ -5,19 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { parseArgs, lastValue } from '../src/cli/args.ts';
-
-/** 与 shot.ts 保持一致的维度表：只测取值校验逻辑。 */
-const DIMENSIONS = {
-  '--theme': { attribute: 'data-theme-mode', values: ['dark', 'light'] },
-  '--density': { attribute: 'data-ui-density', values: ['comfortable', 'compact'] },
-} as const;
-
-function parseDimension(flag: keyof typeof DIMENSIONS, raw: string | undefined): string | null {
-  if (raw === undefined) return null;
-  const { values } = DIMENSIONS[flag];
-  if (!(values as readonly string[]).includes(raw)) throw new Error(`${flag} 取值不合法：${raw}`);
-  return raw;
-}
+import { DIMENSIONS, parseDimension } from '../src/cli/commands/shot.ts';
 
 describe('shot 的维度参数', () => {
   it('两个维度可以同时给', () => {

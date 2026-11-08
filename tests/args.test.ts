@@ -31,6 +31,20 @@ describe('parseArgs', () => {
     expect(parsed.flags.has('--json')).toBe(true);
     expect(parsed.flags.has('--box')).toBe(true);
   });
+
+  it('allowUnknown=false 时未知选项要报错', () => {
+    expect(() => parseArgs(['--boxx'], { allowUnknown: false })).toThrow('未知选项：--boxx');
+  });
+
+  it('带值选项的值本身可以是以 -- 开头的令牌名', () => {
+    const parsed = parseArgs(['--props', '--rc-brand-8', '--box'], {
+      valueFlags: ['--props'],
+      booleanFlags: ['--box'],
+      allowUnknown: false,
+    });
+    expect(parsed.values['--props']).toEqual(['--rc-brand-8']);
+    expect(parsed.flags.has('--box')).toBe(true);
+  });
 });
 
 describe('splitList', () => {

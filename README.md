@@ -15,18 +15,18 @@ npx siyuan-devtools install --skills    # 给 agent 装一页 skill
 
 ```
 会话
-  siyuan-devtools open [--frontend desktop|mobile] [--device "iPhone 13"] [--viewport 390x844]
-  siyuan-devtools reload
-  siyuan-devtools status
+  siyuan-devtools open [--frontend desktop|mobile] [--device "iPhone 13"] [--viewport 390x844] [--headed]
+  siyuan-devtools reload [--frontend desktop|mobile] [--viewport 390x844]
+  siyuan-devtools status [--json]
   siyuan-devtools close
 
 读数
   siyuan-devtools read env
   siyuan-devtools read tokens <name...>
   siyuan-devtools read element <selector> [--props a,b] [--box] [--limit N]
-  siyuan-devtools read contrast <fg> <bg>
+  siyuan-devtools read contrast <fg> <bg>    # fg/bg 可以是令牌名，也可以是 #fff / rgb(...) / hsl(...)
 
-动作（都支持 --diff a,b）
+动作（click/hover/dblclick/fill/drag/select 支持 --diff a,b）
   siyuan-devtools do click <selector> [--button left|right|middle] [--count 1|2]
   siyuan-devtools do hover <selector>
   siyuan-devtools do dblclick <selector>
@@ -43,8 +43,10 @@ npx siyuan-devtools install --skills    # 给 agent 装一页 skill
 
 批量 / 产物
   siyuan-devtools audit <plan.json> [--json]
-  siyuan-devtools shot [--frontend both|desktop|mobile] [--state dark|light|compact] [--out shots]
+  siyuan-devtools shot [--frontend both|desktop|mobile] [--theme dark|light] [--density comfortable|compact] [--out shots]
 ```
+
+`--frontend mobile` 默认使用 390x844 视口；`desktop` 默认 1600x1000。`shot` 会按前端分别设置标准视口。
 
 ## 工作流
 
@@ -66,10 +68,10 @@ npx siyuan-devtools install --skills    # 给 agent 装一页 skill
 | 命令 | 实现 |
 |---|---|
 | `do click/hover/fill/press/...` | 直接转发原生命令 |
-| `read *`、`do menu/dock/attr/reset` | `cli --raw eval` 跑页面 JS 片段 |
-| `audit` | `cli --raw run-code`，整个计划一次执行 |
+| `read *`、`do menu/dock/attr/reset` | `cli --json eval` 跑页面 JS 片段 |
+| `audit` | `cli --json run-code`，整个计划一次执行 |
 
-`open` 会起新 Chrome；会话已存在时不要重复 `open`（它会杀掉旧的），加载新产物用 `reload`。
+`open` 会起新 Chrome；会话按当前工作目录隔离。同一目录会话已存在时不要重复 `open`（它会杀掉旧的），加载新产物用 `reload`。
 
 ## 环境变量
 

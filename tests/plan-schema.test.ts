@@ -80,4 +80,31 @@ describe('parsePlan', () => {
     const message = firstError({ ...VALID, steps: [{ read: 'env' }, { read: 'element', selector: 1 }] });
     expect(message).toContain('steps[1]');
   });
+
+  it('read element 缺 selector 报错', () => {
+    expect(firstError({ ...VALID, steps: [{ read: 'element' }] })).toContain('selector');
+  });
+
+  it('read tokens 缺 names 报错', () => {
+    expect(firstError({ ...VALID, steps: [{ read: 'tokens' }] })).toContain('names');
+  });
+
+  it('read contrast 缺前景/背景报错', () => {
+    const result = parsePlan({ ...VALID, steps: [{ read: 'contrast' }] });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(' ')).toContain('foreground');
+  });
+
+  it('do 必须是受支持的动作格式', () => {
+    expect(firstError({ ...VALID, steps: [{ do: 'teleport:.x' }] })).toContain('hover:<selector>');
+  });
+
+  it('diff 只能用于 do 步骤', () => {
+    expect(firstError({ ...VALID, steps: [{ read: 'env', diff: { selector: '.x', props: ['color'] } }] })).toContain('diff');
+  });
+
+  it('viewport 必须是正数宽高', () => {
+    expect(firstError({ ...VALID, viewport: '0x0' })).toContain('viewport');
+    expect(parsePlan({ ...VALID, viewport: '390x844' }).ok).toBe(true);
+  });
 });

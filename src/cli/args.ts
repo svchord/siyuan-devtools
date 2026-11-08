@@ -30,16 +30,29 @@ interface ParsedArgs {
 interface ParseSpec {
   valueFlags?: readonly string[];
   booleanFlags?: readonly string[];
+  /**
+   * 是否允许未声明的 `--xxx` 落到位置参数。
+   *
+   * `read tokens` 这类命令需要把 CSS 令牌名（`--brand-8`）当位置参数；
+   * 其它命令应传 false，让拼错的 `--boxx` / `--state` 立即报错，而不是静默忽略。
+   */
+  allowUnknown?: boolean;
 }
 
 /** `--out-dir` → `outDir`（commander 的属性名规则）。 */
 const attributeName = (flag: string): string =>
   flag.replace(/^--?/, '').replace(/-([a-z])/g, (_match, char: string) => char.toUpperCase());
 
-/** 解析 argv。不在白名单里的 `--xxx` 一律当位置参数——令牌名就是这种形状。 */
+/**
+ * 解析 argv。
+ *
+ * `allowUnknown` 默认 true 保留旧行为（令牌名可以以 `--` 开头）；
+ * 命令层传 false 时，未声明的选项会报错，避免拼写错误静默变成位置参数。
+ */
 export function parseArgs(argv: string[], spec: ParseSpec = {}): ParsedArgs {
   const valueFlags = spec.valueFlags ?? [];
   const booleanFlags = spec.booleanFlags ?? [];
+  const allowUnknown = spec.allowUnknown ?? true;
   const known = new Set<string>([...valueFlags, ...booleanFlags, '--help', '-h']);
 
   let missingFlag: string | null = null;
@@ -84,6 +97,12 @@ export function parseArgs(argv: string[], spec: ParseSpec = {}): ParsedArgs {
   const flags = new Set<string>();
   for (const flag of booleanFlags) {
     if (opts[attributeName(flag)] === true) flags.add(flag);
+  }
+
+  if (!allowUnknown) {
+    const consumed = new Set(Object.values(values).flat());
+    const unknown = argv.find((token) => token.startsWith('--') && !known.has(token) && !consumed.has(token));
+    if (unknown) throw new Error(`未知选项：${unknown}`);
   }
 
   return { values, flags, positional: program.args };

@@ -13,11 +13,14 @@
  */
 import { runCode } from '../playwright.ts';
 import { readJsonFile, UserError } from '../support.ts';
-import { contrastFn, elementFn, ENV_FN, MENU_FN, TOKENS_FN } from './recipe.ts';
+import { contrastFn, elementFn, ENV_FN, MENU_FN, styleOfFn, TOKENS_FN } from './recipe.ts';
 import { parsePlan } from './plan-schema.ts';
 import type { Plan, PlanStep } from './plan-schema.ts';
 
 export type { Plan, PlanStep } from './plan-schema.ts';
+
+/** 计划动作执行后等待页面过渡/异步渲染。 */
+const ACTION_SETTLE_MS = 500;
 
 /** 读计划文件并校验；失败时把所有问题一次说清。 */
 export function readPlan(path: string): Plan {
@@ -34,18 +37,33 @@ export function readPlan(path: string): Plan {
 function compileStep(step: PlanStep, index: number): string {
   const push = `results.push({ step: ${index}, value: `;
   if (step.do !== undefined) {
-    const [action, ...rest] = step.do.split(':');
-    const arg = rest.join(':');
+    const separator = step.do.indexOf(':');
+    const action = separator === -1 ? step.do : step.do.slice(0, separator);
+    const arg = separator === -1 ? '' : step.do.slice(separator + 1);
+    if (!arg) throw new UserError(`计划第 ${index + 1} 步的 do 缺少参数`);
+    let actionCode: string;
     if (action === 'hover') {
-      return `await page.locator(${JSON.stringify(arg)}).hover(); ${push}null });`;
+      actionCode = `await page.locator(${JSON.stringify(arg)}).hover();`;
+    } else if (action === 'click') {
+      actionCode = `await page.locator(${JSON.stringify(arg)}).click();`;
+    } else if (action === 'menu') {
+      actionCode =
+        `const menuResult${index} = await page.evaluate(${MENU_FN}, ${JSON.stringify(arg)}); ` +
+        `if (!menuResult${index} || menuResult${index}.ok !== true) throw new Error(menuResult${index}?.reason ?? '菜单动作失败');`;
+    } else {
+      throw new UserError(`计划里不支持的动作：${String(action)}`);
     }
-    if (action === 'click') {
-      return `await page.locator(${JSON.stringify(arg)}).click(); ${push}null });`;
+    const settle = `await new Promise((resolve) => setTimeout(resolve, ${ACTION_SETTLE_MS}));`;
+    if (step.diff === undefined) {
+      return `${actionCode} ${settle} ${push}null });`;
     }
-    if (action === 'menu') {
-      return `await page.evaluate(${MENU_FN}, ${JSON.stringify(arg)}); ${push}null });`;
-    }
-    throw new UserError(`计划里不支持的动作：${String(action)}`);
+    const snapshot = styleOfFn(step.diff.selector, step.diff.props);
+    return (
+      `const before${index} = await page.evaluate(${snapshot}); ` +
+      `${actionCode} ${settle} ` +
+      `const after${index} = await page.evaluate(${snapshot}); ` +
+      `${push}{ before: before${index}, after: after${index} } });`
+    );
   }
   if (step.read === 'env') {
     return `${push}await page.evaluate(${ENV_FN}) });`;
@@ -54,7 +72,7 @@ function compileStep(step: PlanStep, index: number): string {
     return `${push}await page.evaluate(${TOKENS_FN}, ${JSON.stringify(step.names ?? [])}) });`;
   }
   if (step.read === 'element') {
-    const fn = elementFn(step.selector ?? '', step.props ?? [], step.box ?? false, step.limit ?? 5);
+    const fn = elementFn(step.selector ?? '', step.props ?? ['color', 'background-color'], step.box ?? false, step.limit ?? 5);
     return `${push}await page.evaluate(${fn}) });`;
   }
   if (step.read === 'contrast') {

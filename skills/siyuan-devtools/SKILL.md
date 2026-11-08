@@ -55,7 +55,7 @@ siyuan-devtools do attr data-theme-mode=dark
 siyuan-devtools do reset
 ```
 
-加 `--diff color,background-color` 会在动作前后各读一次，省一轮往返。
+加 `--diff color,background-color` 会在动作前后各读一次，省一轮往返；支持 `click` / `hover` / `dblclick` / `fill` / `drag` / `select`。动作后会等待过渡落定。
 
 交互态跨命令保留：`do hover` 之后直接 `read element` 就能读到 hover 后的样式。
 
@@ -86,6 +86,8 @@ siyuan-devtools shot --frontend both --theme dark --out shots
 siyuan-devtools shot --density compact --out shots        # 明暗保持页面当前值
 siyuan-devtools shot --theme dark --density compact       # 两个维度可组合
 ```
+
+`--frontend mobile` 默认使用 390x844 视口；桌面端默认 1600x1000。
 
 ## 约定
 

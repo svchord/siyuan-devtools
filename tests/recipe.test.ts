@@ -5,7 +5,16 @@
  * 不该各写一份。
  */
 import { describe, expect, it } from 'vitest';
-import { elementFn, ENV_FN, evalExpr, styleOfFn, TOKENS_FN } from '../src/cli/script/recipe.ts';
+import {
+  ATTR_FN,
+  elementFn,
+  ENV_FN,
+  evalExpr,
+  MENU_FN,
+  RESET_FN,
+  styleOfFn,
+  TOKENS_FN,
+} from '../src/cli/script/recipe.ts';
 
 /** 片段必须是可被 eval 的表达式。 */
 function assertParses(source: string): void {
@@ -19,7 +28,7 @@ describe('函数体（给 page.evaluate 用）', () => {
   it('styleOf', () => assertParses(styleOfFn('.x', ['color'])));
 });
 
-describe('evalExpr（给 cli --raw eval 用）', () => {
+describe('evalExpr（给 cli --json eval 用）', () => {
   it('无参函数包成自执行', () => {
     const expr = evalExpr(ENV_FN);
     expect(expr.startsWith('(')).toBe(true);
@@ -44,5 +53,22 @@ describe('element 片段', () => {
 
   it('--box 时才输出 boxes', () => {
     expect(elementFn('.x', ['color'], true, 3)).toContain('out.boxes');
+  });
+});
+
+describe('动作片段', () => {
+  it('menu 使用 data-id 且不会先关闭当前菜单', () => {
+    expect(MENU_FN).toContain('data-id');
+    expect(MENU_FN).not.toContain('api.remove');
+    expect(MENU_FN).toContain('找不到菜单项');
+  });
+
+  it('attr 把 null/undefined 都当作删除', () => {
+    expect(ATTR_FN).toContain('value === undefined || value === null');
+  });
+
+  it('reset 恢复初始根属性快照', () => {
+    expect(RESET_FN).toContain('__siyuanDevtoolsRootAttrs');
+    expect(RESET_FN).toContain('removeAttribute');
   });
 });
