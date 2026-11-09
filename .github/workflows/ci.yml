@@ -44,6 +44,15 @@ jobs:
         run: |
           node dist/cli.js --help > /dev/null
           node dist/cli.js read contrast '#000' '#fff' --json
+          # 错误路径：未知命令必须以 2 退出、且只打一行（不带堆栈）。
+          set +e
+          out=$(node dist/cli.js teleport 2>&1)
+          code=$?
+          set -e
+          [ "$code" -eq 2 ] || { echo "期望退出码 2，实际 $code"; exit 1; }
+          [ "$(echo "$out" | wc -l)" -eq 1 ] || { echo "错误输出应只有一行：$out"; exit 1; }
+          # oklch 不能被当成裸三元组算出一个错值。
+          node dist/cli.js read contrast 'oklch(0.7 0.1 200)' '#fff' --json | grep -q '"ratio": null'
 
       # 安装态冒烟：上面那步在仓库里跑，仓库的 node_modules 布局和用户装下来
       # 的不一样。曾经 cliPath() 用 require.resolve('playwright-core/cli.js')，

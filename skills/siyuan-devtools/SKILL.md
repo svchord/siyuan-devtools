@@ -16,6 +16,7 @@ siyuan-devtools close                       # 关闭
 ```
 
 `open` 只调一次。**不要再 open 第二次**——它会杀掉旧 Chrome 起一个新的。
+（`reload` / `audit` / `shot` 内部可能重开浏览器，那是它们的职责，且会还原会话。）
 
 ## 改完源码后
 
@@ -87,11 +88,13 @@ siyuan-devtools shot --density compact --out shots        # 明暗保持页面�
 siyuan-devtools shot --theme dark --density compact       # 两个维度可组合
 ```
 
-`--frontend mobile` 默认使用 390x844 视口；桌面端默认 1600x1000。
+`--frontend mobile` 默认模拟 iPhone 13（390x664，dpr 3）；桌面端默认 1600x1000。
+`shot` 会为每个前端重开浏览器（设备模拟只能在 open 时指定），结束时把会话还原到截图前的状态。
 
 ## 约定
 
 - 加 `--json` 拿结构化输出（默认是人读文本）。
-- 端口默认 6806，可用 `SIYUAN_PORT` 或 `--url` 覆盖。
+- 端口默认 6806，可用 `SIYUAN_PORT` 或 `--url` 覆盖；`open` 时的 URL 会被记住。
+- `--` 之后的参数按字面量处理，例如 `do fill '#inp' -- --json`。
 - 退出码 0 = 成功，2 = 失败（错误信息在 stderr）。
 - 不确定参数时用 `siyuan-devtools --help`。

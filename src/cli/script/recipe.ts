@@ -221,4 +221,3 @@ export const RESET_FN = `() => {
 export function evalExpr(fn: string, arg?: unknown): string {
   return arg === undefined ? `(${fn})()` : `(${fn})(${JSON.stringify(arg)})`;
 }
-

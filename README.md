@@ -46,7 +46,8 @@ npx siyuan-devtools install --skills    # 给 agent 装一页 skill
   siyuan-devtools shot [--frontend both|desktop|mobile] [--theme dark|light] [--density comfortable|compact] [--out shots]
 ```
 
-`--frontend mobile` 默认使用 390x844 视口；`desktop` 默认 1600x1000。`shot` 会按前端分别设置标准视口。
+`--frontend mobile` 默认模拟 iPhone 13（视口 390x664，dpr 3）；`desktop` 默认 1600x1000。
+`--device` 只在 `open` 时生效，所以 `reload` / `audit` / `shot` 在切换前端时会重开浏览器。
 
 ## 工作流
 
@@ -71,14 +72,22 @@ npx siyuan-devtools install --skills    # 给 agent 装一页 skill
 | `read *`、`do menu/dock/attr/reset` | `cli --json eval` 跑页面 JS 片段 |
 | `audit` | `cli --json run-code`，整个计划一次执行 |
 
-`open` 会起新 Chrome；会话按当前工作目录隔离。同一目录会话已存在时不要重复 `open`（它会杀掉旧的），加载新产物用 `reload`。
+`open` 会起新 Chrome；会话按 Playwright 的 workspace（向上查找 `.playwright/`）隔离。同一 workspace 已有会话时不要重复 `open`（它会杀掉旧的），加载新产物用 `reload`。
+
+会话状态（入口 URL、前端、设备、视口）记在 `.playwright/siyuan-devtools.json`，所以 `reload` / `audit` / `shot` 不带 `--url` 时会沿用 `open` 时的实例。
 
 ## 环境变量
 
 | 变量 | 说明 |
 |---|---|
-| `SIYUAN_PORT` | kernel 端口，缺省 6806 |
-| `--url` | 直接给前端 URL，覆盖端口拼装 |
+| `SIYUAN_PORT` | kernel 端口，缺省 6806（必须是 1–65535 的整数） |
+| `--url` | 直接给前端 URL，覆盖端口拼装；后续命令会记住它 |
+
+`--` 之后的参数一律按字面量处理，用来传以 `--` 开头的值：
+
+```bash
+siyuan-devtools do fill '#inp' -- --json     # 把字面量 "--json" 输入到页面
+```
 
 ## 退出码
 

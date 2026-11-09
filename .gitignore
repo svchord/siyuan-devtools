@@ -3,6 +3,7 @@ dist
 *.log
 .playwright-cli
 .playwright
+/.agents
 /shots
 .idea
 *.tsbuildinfo

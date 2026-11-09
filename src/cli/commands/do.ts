@@ -10,13 +10,7 @@
 import { lastValue, parseArgs, positiveInt } from '../args.ts';
 import { UserError } from '../errors.ts';
 import { output } from '../format.ts';
-import { evalScript, runCli } from '../playwright.ts';
-
-/** 第 3 步临时包装；下个提交换成 playwright.ts 里的 runCliAction。 */
-const runCliAction = (command: string, positional: readonly string[]): string => {
-  const needsSeparator = positional.some((token) => token.startsWith('-'));
-  return runCli(needsSeparator ? [command, '--', ...positional] : [command, ...positional]);
-};
+import { evalScript, runCliAction } from '../playwright.ts';
 import { ATTR_FN, dockFn, evalExpr, MENU_FN, RESET_FN, styleOfFn } from '../script/recipe.ts';
 import { ACTION_SETTLE_MS, POINTER_PARK_MS } from '../timing.ts';
 import { isRecord, sleep } from '../util.ts';

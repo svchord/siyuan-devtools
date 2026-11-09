@@ -1,4 +1,4 @@
-/** 视口参数：正数校验与前端预设。 */
+/** 视口参数：正数校验、上限与前端预设。 */
 import { describe, expect, it } from 'vitest';
 import { DESKTOP_VIEWPORT, MOBILE_VIEWPORT, parseViewport, viewportFor } from '../src/cli/viewport.ts';
 
@@ -12,6 +12,12 @@ describe('parseViewport', () => {
     expect(() => parseViewport('0x0')).toThrow('正整数');
     expect(() => parseViewport('390x0')).toThrow('正整数');
     expect(() => parseViewport('0x844')).toThrow('正整数');
+  });
+
+  it('拒绝超过上限的宽高（否则 99999x99999 会真的生效）', () => {
+    expect(() => parseViewport('99999x99999')).toThrow('正整数');
+    expect(() => parseViewport('10001x844')).toThrow('正整数');
+    expect(parseViewport('10000x844')).toEqual({ width: 10000, height: 844 });
   });
 
   it('拒绝非数字/非法格式', () => {
