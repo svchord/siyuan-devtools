@@ -1,6 +1,6 @@
 {
   "name": "siyuan-devtools",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Agent-facing CLI for measuring real SiYuan theme/plugin rendering",
   "keywords": [
     "siyuan",
