@@ -232,14 +232,13 @@ export async function reload(argv: string[], url: string | null): Promise<void> 
   note(`已重新加载：${targetUrl}`);
 }
 
-/** status 的输出是数据，留在 stdout。 */
+/** status 的输出是数据，留在 stdout。文本模式沿用 playwright-cli 自己的排版。 */
 export function status(json: boolean): void {
   if (!sessionExists()) {
     output(json ? { browsers: [] } : '未启动', json);
     return;
   }
-  const sessions = listSessions();
-  output(json ? { browsers: sessions } : sessions, json);
+  output(json ? { browsers: listSessions() } : runCli(['list']), json);
 }
 
 export function close(): void {

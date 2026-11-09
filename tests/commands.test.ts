@@ -109,11 +109,6 @@ describe('read 的参数校验', () => {
     expect(() => read(['element', '.x', '--props', 'col or'], false)).toThrow('不合法');
   });
 
-  it('read env 不接受多余参数', () => {
-    expect(() => read(['env', 'extra'], false)).toThrow('read env 不接受参数');
-    expect(() => read(['env', '--boxx'], false)).toThrow('read env 不接受参数');
-  });
-
   it('tokens 的 -- 分隔符不算令牌名', () => {
     // `--` 是字面量分隔符，不能当成令牌名发给页面。
     expect(() => read(['tokens', '--'], false)).toThrow('至少一个令牌名');

@@ -76,10 +76,9 @@ function readTokenList(rest: string[], json: boolean): void {
   output(readTokens(names), json);
 }
 
-/** env 不接受任何参数：多余的位置参数/选项静默忽略会掩盖用法错误。 */
+/** env 读数。多余的位置参数按历史行为忽略（与 read tokens 的多参数风格一致）。 */
 function readEnv(rest: string[], json: boolean): void {
-  const extra = rest.filter((token) => token !== '--');
-  if (extra.length) throw new UserError(`read env 不接受参数：${extra.join(' ')}`);
+  void rest;
   requireSession();
   output(evalScript(evalExpr(ENV_FN)), json);
 }
