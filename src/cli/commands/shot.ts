@@ -134,7 +134,9 @@ export async function shot(argv: string[], url: string | null, json: boolean): P
       const attributes: Array<[string, string]> = [];
       if (theme) attributes.push([DIMENSIONS['--theme'].attribute, theme]);
       if (density) attributes.push([DIMENSIONS['--density'].attribute, density]);
-      const deviceName = deviceNameFor(frontend);
+      // 会话显式指定过设备时沿用（否则 mobile 会被默认值顶成 iPhone 13）。
+      // --device 只在 mobile 语义下有意义，desktop 一律不模拟。
+      const deviceName = deviceNameFor(frontend, frontend === 'mobile' ? savedState.device : null);
       const file = join(outDir, `${frontend}${suffix ? `-${suffix}` : ''}.png`);
 
       // 一次 run-code 内完成「切设备 + 导航 + 设主题 + 截图」：

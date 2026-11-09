@@ -60,6 +60,29 @@ describe('deviceNameFor', () => {
     expect(deviceNameFor('mobile')).toBe(MOBILE_DEVICE);
     expect(deviceNameFor('desktop')).toBeNull();
   });
+
+  /**
+   * 回归：shot 曾经用 deviceNameFor(frontend) 忽略会话里 --device 指定的机型，
+   * `open --device "Pixel 7"` 后截图仍是 iPhone 13 的尺寸。
+   */
+  it('会话显式设备覆盖 mobile 默认值', () => {
+    expect(deviceNameFor('mobile', 'Pixel 7')).toBe('Pixel 7');
+    expect(deviceNameFor('mobile', null)).toBe(MOBILE_DEVICE);
+  });
+});
+
+describe('设备像素尺寸', () => {
+  it('iPhone 13 截图应为 1170x1992（390x664 @3x）', () => {
+    const profile = deviceProfile('iPhone 13');
+    expect(profile.width * profile.deviceScaleFactor).toBe(1170);
+    expect(profile.height * profile.deviceScaleFactor).toBe(1992);
+  });
+
+  it('Pixel 7 截图应为 1082x2202（412x839 @2.625x）', () => {
+    const profile = deviceProfile('Pixel 7');
+    expect(Math.round(profile.width * profile.deviceScaleFactor)).toBe(1082);
+    expect(Math.round(profile.height * profile.deviceScaleFactor)).toBe(2202);
+  });
 });
 
 describe('deviceScript', () => {
