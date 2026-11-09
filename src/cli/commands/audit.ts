@@ -1,31 +1,49 @@
 /** 批量命令：读计划文件，整个计划编成一次 run-code 执行。 */
-import { readPlan, runPlan } from '../script/plan.ts';
+import { UserError } from '../errors.ts';
 import { output } from '../format.ts';
 import { runCli, sessionExists } from '../playwright.ts';
-import { UserError } from '../support.ts';
-import { frontendUrl } from '../url.ts';
+import { readPlan, runPlan } from '../script/plan.ts';
+import { readState, writeState } from '../session-state.ts';
+import { resolveFrontendUrl } from '../url.ts';
 import { parseViewport, viewportFor } from '../viewport.ts';
-import { applyViewport, captureRootSnapshot, deviceArgsFor, waitForReady } from './session.ts';
+import { applyViewport, captureRootSnapshot, currentFrontend, launch, waitForReady } from './session.ts';
 
-/** audit 是唯一自动创建会话的命令（计划里已声明 frontend）。 */
+/**
+ * audit 是唯一自动创建会话的命令（计划里已声明 frontend）。
+ *
+ * 已有会话且前端不同时必须重开：设备模拟（dpr/UA）只能在 open 时指定，
+ * 否则 mobile 计划会跑在 desktop 的 dpr=1 上，`min-resolution` /
+ * `pointer: coarse` 全部走错分支。
+ *
+ * 复用会话时**不要**无条件 resize：mobile 会话带着 iPhone 13 的设备视口
+ * （390x664），resize 成 390x844 会让同一个前端在 open 与 audit 两条路径上
+ * 给出不同测量视口。
+ */
 export async function audit(args: string[], json: boolean, url: string | null): Promise<void> {
   const planPath = args[0];
   if (!planPath) throw new UserError('audit 需要计划文件路径');
   const plan = readPlan(planPath);
 
-  const targetUrl = frontendUrl(plan.frontend, url);
-  if (!sessionExists()) {
-    // 与 session.ts 的 open 走同一套设备参数：mobile 必须模拟真机，
-    // 否则 dpr 停在 1，min-resolution / pointer 等媒体查询不会命中。
-    runCli(['open', '--browser=chrome', ...deviceArgsFor(plan.frontend), targetUrl]);
-  } else {
-    // 计划声明了 frontend：已有会话也要导航到对应入口，不能沿用别的页面。
-    runCli(['goto', targetUrl]);
-  }
+  const targetUrl = resolveFrontendUrl(plan.frontend, url);
+  const viewport = plan.viewport === undefined ? null : parseViewport(plan.viewport);
+  const state = readState();
+  const actual = sessionExists() ? currentFrontend() : null;
+  const reuse = actual === plan.frontend;
 
-  // 计划里的 viewport 优先；没写则按前端使用标准视口，保证移动端截图/测量不是桌面宽度。
-  applyViewport(plan.viewport === undefined ? viewportFor(plan.frontend) : parseViewport(plan.viewport));
-  await waitForReady();
-  await captureRootSnapshot();
+  if (reuse) {
+    // 计划声明了 frontend：已有会话也要导航到对应入口，不能沿用别的页面。
+    if (viewport) applyViewport(viewport);
+    runCli(['goto', targetUrl]);
+    await waitForReady();
+    captureRootSnapshot();
+  } else {
+    await launch(plan.frontend, targetUrl, { viewport: viewport ?? viewportFor(plan.frontend) });
+  }
+  writeState({
+    url: targetUrl,
+    frontend: plan.frontend,
+    device: reuse ? (state?.device ?? null) : null,
+    viewport: reuse ? (viewport ?? state?.viewport ?? null) : viewport,
+  });
   output(runPlan(plan), json);
 }

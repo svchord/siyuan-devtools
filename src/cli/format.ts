@@ -6,13 +6,17 @@
  * 分流规则（clig.dev）：数据走 stdout，状态提示走 stderr。
  * `--json` 时 stdout 只有格式化 JSON，可直接被 `jq` 消费。
  */
-/** 供 `--json` 用的类型别名（避免 any）。 */
-type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
-/** 输出结果：默认紧凑文本，`--json` 时原样输出 JSON。 */
+/**
+ * 输出结果：默认紧凑文本，`--json` 时原样输出 JSON。
+ *
+ * `--json` 的契约是「stdout 只有一段合法 JSON」：`JSON.stringify(undefined)`
+ * 返回 undefined，直接打印会输出字面量 `undefined`，`jq` 当场失败。
+ * 所以 undefined 在 JSON 模式下折成 null。
+ */
 export function output(value: unknown, json: boolean): void {
   if (json) {
-    console.log(JSON.stringify(value as JsonValue, null, 2));
+    console.log(JSON.stringify(value === undefined ? null : value, null, 2));
     return;
   }
   // 字符串按原样输出：调用方可能已经排好版（如 shot 的路径列表）。
@@ -35,6 +39,7 @@ function render(value: unknown, indent = 0): string {
     if (!entries.length) return `${pad}(空)`;
     return entries
       .map(([key, item]) => {
+        if (item === undefined) return `${pad}${key}: (无)`;
         if (item !== null && typeof item === 'object') {
           return `${pad}${key}:\n${render(item, indent + 1)}`;
         }
@@ -43,4 +48,9 @@ function render(value: unknown, indent = 0): string {
       .join('\n');
   }
   return `${pad}${String(value)}`;
+}
+
+/** 状态提示：走 stderr，不污染 stdout 的数据。 */
+export function note(message: string): void {
+  console.error(message);
 }

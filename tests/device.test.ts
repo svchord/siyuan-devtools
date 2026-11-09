@@ -7,11 +7,11 @@
  * 分支全部走错，截图也只有真机 1/3 的分辨率。
  */
 import { describe, expect, it } from 'vitest';
-import { deviceArgsFor } from '../src/cli/commands/session.ts';
+import { deviceArgsFor, MOBILE_DEVICE } from '../src/cli/commands/session.ts';
 
 describe('deviceArgsFor', () => {
   it('mobile 默认模拟真机', () => {
-    expect(deviceArgsFor('mobile')).toEqual(['--device=iPhone 13']);
+    expect(deviceArgsFor('mobile')).toEqual([`--device=${MOBILE_DEVICE}`]);
   });
 
   it('desktop 不模拟设备', () => {
