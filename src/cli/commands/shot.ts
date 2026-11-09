@@ -1,5 +1,5 @@
 /**
- * 截图命令：原生 `cli screenshot`。输出的是文件路径（数据，走 stdout）。
+ * 截图命令：用 CDP `Page.captureScreenshot` 出图，输出文件路径（数据，走 stdout）。
  *
  * ## 为什么是 `--theme` + `--density` 而不是一个 `--state`
  *
@@ -8,14 +8,19 @@
  *   data-ui-density  → comfortable | compact
  * 用一个互斥的 `--state` 表达不了「暗色 + 紧凑」这种组合。
  *
+ * ## 不重开浏览器
+ *
+ * 每个前端用一次 run-code 完成「CDP 切设备 + 导航 + 设属性 + 截图」，
+ * 浏览器始终是同一个会话（见 device.ts 里那三个坑）。
+ *
  * ## 结束时必须恢复
  *
- * `shot` 会重开浏览器、改视口、改这两个属性。不恢复的话，紧接着的
+ * `shot` 会导航到别的前端、改视口、改这两个属性。不恢复的话，紧接着的
  * `read env` / `read element` 读到的就是截图用的临时状态（实测
  * `shot --theme dark` 之后 `read env` 仍返回 `themeMode: dark`）。
  *
- * 恢复用的是**截图前读到的实际值**，不是 root 快照——重开浏览器之后
- * 快照记录的是新页面的初始值，不能拿来还原截图前的自定义状态。
+ * 恢复用的是**截图前读到的实际值**，不是 root 快照——导航之后快照记录的是
+ * 新页面的初始值，不能拿来还原截图前的自定义状态。
  * 恢复失败不能掩盖原始错误：`finally` 里的异常只在没有原始错误时抛出。
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
