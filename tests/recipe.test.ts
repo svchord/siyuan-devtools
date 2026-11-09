@@ -219,10 +219,10 @@ describe('elementFn 的行为', () => {
     expect((result.styles as Record<string, string>).color).toBe('rgb(255, 0, 0)');
   });
 
-  it('--box 时输出可见元素的尺寸，且不含恒等于下标的 index', () => {
+  it('--box 时输出可见元素的尺寸（含 index）', () => {
     const a = element('div', { class: 'item' });
     const result = withDom({ all: [a] }, () => load(elementFn('.item', ['color'], true, 5))() as Record<string, unknown>);
-    expect(result.boxes).toEqual([{ x: 8, y: 8, width: 200, height: 40 }]);
+    expect(result.boxes).toEqual([{ index: 0, x: 8, y: 8, width: 200, height: 40 }]);
   });
 
   it('默认属性只有一处定义', () => {

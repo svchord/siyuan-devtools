@@ -18,7 +18,13 @@ import type { Frontend } from './url.ts';
 /** 移动端默认模拟的设备。 */
 export const MOBILE_DEVICE = 'iPhone 13';
 
-/** Playwright 设备名 → CDP 参数。 */
+/**
+ * 设备画像。
+ *
+ * `width` / `height` 是**设备自带**的视口；调用方通常会用 `viewportFor(frontend)`
+ * 覆盖它（旧工具与 README 一直以 390x844 作为移动端 CSS 视口，截图因此是
+ * 1170x2532）。设备只负责 dpr / UA / touch 这几个「不能靠 resize 得到」的维度。
+ */
 interface DeviceProfile {
   width: number;
   height: number;
@@ -65,13 +71,21 @@ export function deviceNameFor(frontend: Frontend, device: string | null = null):
   return frontend === 'mobile' ? MOBILE_DEVICE : null;
 }
 
-/** 在页面里执行一段用 CDP 切设备的脚本（供 run-code 使用）。 */
-export function deviceScript(profile: DeviceProfile | null, desktopViewport?: { width: number; height: number }): string {
+/**
+ * 在页面里执行一段用 CDP 切设备的脚本（供 run-code 使用）。
+ *
+ * `viewport` 覆盖设备自带的宽高：设备只提供 dpr / UA / touch。
+ * 不传 `viewport` 时才用设备自带尺寸。
+ */
+export function deviceScript(
+  profile: DeviceProfile | null,
+  viewport?: { width: number; height: number }
+): string {
   if (profile === null) {
     // 不能只 clearDeviceMetricsOverride：实测它不会把 dpr 与 UA 复原
     // （清掉后 dpr 仍是 3、UA 还是 iPhone）。必须显式写回桌面参数。
-    const width = desktopViewport?.width ?? 1600;
-    const height = desktopViewport?.height ?? 1000;
+    const width = viewport?.width ?? 1600;
+    const height = viewport?.height ?? 1000;
     return `async (page) => {
   const session = await page.context().newCDPSession(page);
   await session.send('Emulation.setDeviceMetricsOverride', {
@@ -83,8 +97,8 @@ export function deviceScript(profile: DeviceProfile | null, desktopViewport?: { 
 }`;
   }
   const metrics = {
-    width: profile.width,
-    height: profile.height,
+    width: viewport?.width ?? profile.width,
+    height: viewport?.height ?? profile.height,
     deviceScaleFactor: profile.deviceScaleFactor,
     mobile: profile.mobile,
     screenWidth: profile.screenWidth,
@@ -119,22 +133,23 @@ export function deviceScript(profile: DeviceProfile | null, desktopViewport?: { 
  */
 export function captureScript(options: {
   profile: DeviceProfile | null;
+  viewport: { width: number; height: number };
   url: string;
   attributes: ReadonlyArray<readonly [string, string]>;
   settleMs: number;
 }): string {
-  const { profile, url, attributes, settleMs } = options;
+  const { profile, viewport, url, attributes, settleMs } = options;
   const metrics = profile
     ? {
-        width: profile.width,
-        height: profile.height,
+        width: viewport.width,
+        height: viewport.height,
         deviceScaleFactor: profile.deviceScaleFactor,
         mobile: profile.mobile,
         screenWidth: profile.screenWidth,
         screenHeight: profile.screenHeight,
         screenOrientation: { type: 'portraitPrimary', angle: 0 },
       }
-    : { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false };
+    : { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: false };
   const touch = profile?.hasTouch ?? false;
   const userAgent = profile?.userAgent ?? '';
   const assignment = attributes

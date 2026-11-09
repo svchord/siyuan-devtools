@@ -121,11 +121,16 @@ export interface LaunchOptions {
  * 但不用杀掉浏览器。切换后必须重新导航：`navigator.maxTouchPoints` 与
  * `'ontouchstart' in window` 在页面加载时固化。
  *
+ * `viewport` 决定 CSS 视口尺寸；设备只提供 dpr / UA / touch。
  * 不传 device 时显式写回桌面参数（不能只 clear，clear 不会复原 dpr/UA）。
  */
-export function applyDevice(frontend: Frontend, device: string | null = null, desktopViewport?: Viewport): void {
+export function applyDevice(
+  frontend: Frontend,
+  device: string | null = null,
+  viewport?: Viewport
+): void {
   const name = deviceNameFor(frontend, device);
-  runCode(deviceScript(name === null ? null : deviceProfile(name), desktopViewport));
+  runCode(deviceScript(name === null ? null : deviceProfile(name), viewport));
 }
 
 /**
@@ -148,16 +153,17 @@ export function applyDevice(frontend: Frontend, device: string | null = null, de
 export async function launch(frontend: Frontend, url: string, options: LaunchOptions = {}): Promise<void> {
   ensureWorkspace();
   const device = options.device ?? null;
-  const deviceName = deviceNameFor(frontend, device);
   const reuse = sessionExists();
 
-  // 这次要用的视口：显式 viewport 优先，否则设备自带，否则前端预设。
-  const viewport = options.viewport ?? (deviceName ? null : viewportFor(frontend));
+  // 视口只由前端预设或 --viewport 决定。设备（iPhone 13 等）只负责
+  // dpr / UA / touch——它的自带视口是 390x664（不含浏览器 chrome），
+  // 与本工具一直使用的 390x844 语义不同，不能拿来当测量视口。
+  const viewport = options.viewport ?? viewportFor(frontend);
 
   if (reuse) {
     // 复用会话：先导航到目标页，再套设备模拟，最后 reload 让 touch 生效。
     runCli(['goto', url]);
-    applyDevice(frontend, device, viewport ?? undefined);
+    applyDevice(frontend, device, viewport);
     runCli(['reload']);
   } else {
     // 新会话：设备模拟直接由 open 原生完成，不用 CDP。
@@ -165,7 +171,7 @@ export async function launch(frontend: Frontend, url: string, options: LaunchOpt
     if (options.headed) args.push('--headed');
     args.push(url);
     runCli(args);
-    if (viewport) applyViewport(viewport);
+    applyViewport(viewport);
   }
 
   await waitForReady();

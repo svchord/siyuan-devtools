@@ -35,6 +35,7 @@ import type { SessionState } from '../session-state.ts';
 import { THEME_SWITCH_MS } from '../timing.ts';
 import { parseFrontend, resolveFrontendUrl } from '../url.ts';
 import type { Frontend } from '../url.ts';
+import { viewportFor } from '../viewport.ts';
 import { captureScript, deviceNameFor, deviceProfile } from '../device.ts';
 import { requireSession, restoreSession } from './session.ts';
 
@@ -142,14 +143,19 @@ export async function shot(argv: string[], url: string | null, json: boolean): P
       // 会话显式指定过设备时沿用（否则 mobile 会被默认值顶成 iPhone 13）。
       // --device 只在 mobile 语义下有意义，desktop 一律不模拟。
       const deviceName = deviceNameFor(frontend, frontend === 'mobile' ? savedState.device : null);
+      // 视口：只有「正在截的就是保存的那个前端」才沿用会话的自定义视口，
+      // 否则用该前端自己的标准视口（mobile 390x844 / desktop 1600x1000）。
+      const viewport =
+        frontend === savedState.frontend && savedState.viewport ? savedState.viewport : viewportFor(frontend);
       const file = join(outDir, `${frontend}${suffix ? `-${suffix}` : ''}.png`);
 
       // 一次 run-code 内完成「切设备 + 导航 + 设主题 + 截图」：
       // Page.captureScreenshot 只在设置设备覆盖的那个 CDP 会话里看到设备参数，
-      // 拆成两次调用会退回 CSS 像素尺寸（实测 390x664 而不是 1170x1992）。
+      // 拆成两次调用会退回 CSS 像素尺寸（实测 390x664 而不是 1170x2532）。
       const captured = runCode(
         captureScript({
           profile: deviceName ? deviceProfile(deviceName) : null,
+          viewport,
           url: resolveFrontendUrl(frontend, url),
           attributes,
           settleMs: THEME_SWITCH_MS,

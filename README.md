@@ -46,7 +46,7 @@ npx siyuan-devtools install --skills    # 给 agent 装一页 skill
   siyuan-devtools shot [--frontend both|desktop|mobile] [--theme dark|light] [--density comfortable|compact] [--out shots]
 ```
 
-`--frontend mobile` 默认模拟 iPhone 13（视口 390x664，dpr 3）；`desktop` 默认 1600x1000。
+`--frontend mobile` 默认模拟 iPhone 13（dpr 3、移动端 UA、touch），CSS 视口仍是 390x844；`desktop` 默认 1600x1000 与 dpr 1。
 `--device` 只在 `open` 时用原生设备模拟；已有会话上切换前端时，`reload` / `audit` / `shot`
 会改用 CDP 就地切换设备参数（dpr / UA / touch / pointer 全部一致），不重开浏览器。
 

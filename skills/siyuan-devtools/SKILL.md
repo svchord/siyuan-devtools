@@ -88,7 +88,7 @@ siyuan-devtools shot --density compact --out shots        # 明暗保持页面�
 siyuan-devtools shot --theme dark --density compact       # 两个维度可组合
 ```
 
-`--frontend mobile` 默认模拟 iPhone 13（390x664，dpr 3）；桌面端默认 1600x1000。
+`--frontend mobile` 默认模拟 iPhone 13（dpr 3、移动端 UA、touch），CSS 视口仍是 390x844；桌面端默认 1600x1000 与 dpr 1。
 `shot` 会为每个前端就地切换设备模拟（不重开浏览器），结束时把会话还原到截图前的状态。
 
 ## 约定

@@ -114,6 +114,7 @@ describe('captureScript', () => {
   it('把设设备、导航、设主题、截图放在同一个 run-code 里', () => {
     const script = captureScript({
       profile: deviceProfile('iPhone 13'),
+      viewport: { width: 390, height: 844 },
       url: 'http://127.0.0.1:8899/stage/build/mobile/',
       attributes: [['data-theme-mode', 'dark']],
       settleMs: 0,
@@ -126,12 +127,58 @@ describe('captureScript', () => {
   });
 
   it('没有主题/密度时不生成多余的 waitForTimeout', () => {
-    const script = captureScript({ profile: null, url: 'http://x/', attributes: [], settleMs: 500 });
+    const script = captureScript({
+      profile: null,
+      viewport: { width: 1600, height: 1000 },
+      url: 'http://x/',
+      attributes: [],
+      settleMs: 500,
+    });
     expect(script).not.toContain('waitForTimeout');
   });
 
   it('desktop 截图用桌面参数（dpr=1）', () => {
-    const script = captureScript({ profile: null, url: 'http://x/', attributes: [], settleMs: 0 });
+    const script = captureScript({
+      profile: null,
+      viewport: { width: 1600, height: 1000 },
+      url: 'http://x/',
+      attributes: [],
+      settleMs: 0,
+    });
     expect(script).toContain('"deviceScaleFactor":1');
+  });
+
+  /**
+   * 回归：captureScript 曾经写死桌面 1600x1000，导致 `open --viewport 1280x720`
+   * 之后 shot 的截图还是 1600x1000。
+   */
+  it('截图视口用传入值，不写死', () => {
+    const script = captureScript({
+      profile: null,
+      viewport: { width: 1280, height: 720 },
+      url: 'http://x/',
+      attributes: [],
+      settleMs: 0,
+    });
+    expect(script).toContain('"width":1280');
+    expect(script).toContain('"height":720');
+  });
+
+  /**
+   * 回归：设备自带视口是 390x664（不含浏览器 chrome），而本工具一直以
+   * 390x844 作为移动端 CSS 视口。设备只该提供 dpr/UA/touch。
+   */
+  it('mobile 用 390x844 而不是设备自带的 390x664', () => {
+    const script = captureScript({
+      profile: deviceProfile('iPhone 13'),
+      viewport: { width: 390, height: 844 },
+      url: 'http://x/',
+      attributes: [],
+      settleMs: 0,
+    });
+    expect(script).toContain('"width":390');
+    expect(script).toContain('"height":844');
+    expect(script).not.toContain('"height":664');
+    expect(script).toContain('"deviceScaleFactor":3');
   });
 });

@@ -36,8 +36,7 @@ export const ENV_FN = `() => {
     themeMode: root.getAttribute('data-theme-mode'),
     uiDensity: root.getAttribute('data-ui-density'),
     themeStyle: stylesheetHref('themeStyle'),
-    pluginsStyle: [...document.querySelectorAll('[id^="pluginsStyle"]')]
-      .map(el => ({ id: el.id, href: el.getAttribute('href') })),
+    pluginsStyle: [...document.querySelectorAll('[id^="pluginsStyle"]')].map(el => el.id),
     url: location.href,
     domNodes: document.querySelectorAll('*').length,
     viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
@@ -116,9 +115,9 @@ export const elementFn = (selector: string, props: readonly string[], box: boole
     className: target ? (target.getAttribute('class') ?? '').slice(0, 120) : null,
     styles,
   };
-  ${box ? `out.boxes = shown.slice(0, ${limit}).map((el) => {
+  ${box ? `out.boxes = shown.slice(0, ${limit}).map((el, i) => {
     const r = el.getBoundingClientRect();
-    return { x: Math.round(r.x * 10) / 10, y: Math.round(r.y * 10) / 10,
+    return { index: i, x: Math.round(r.x * 10) / 10, y: Math.round(r.y * 10) / 10,
       width: Math.round(r.width * 10) / 10, height: Math.round(r.height * 10) / 10 };
   });` : ''}
   return out;
