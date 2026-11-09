@@ -18,19 +18,19 @@
  * 快照记录的是新页面的初始值，不能拿来还原截图前的自定义状态。
  * 恢复失败不能掩盖原始错误：`finally` 里的异常只在没有原始错误时抛出。
  */
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { lastValue, parseArgs } from '../args.ts';
 import { EnvironmentError, UserError } from '../errors.ts';
 import { note, output } from '../format.ts';
-import { evalScript, runCli } from '../playwright.ts';
+import { evalScript, runCli, runCode } from '../playwright.ts';
 import { ENV_FN, evalExpr } from '../script/recipe.ts';
 import { readState, writeState } from '../session-state.ts';
 import type { SessionState } from '../session-state.ts';
 import { THEME_SWITCH_MS } from '../timing.ts';
 import { parseFrontend, resolveFrontendUrl } from '../url.ts';
 import type { Frontend } from '../url.ts';
-import { sleep } from '../util.ts';
+import { captureScript, deviceNameFor, deviceProfile } from '../device.ts';
 import { requireSession, restoreSession } from './session.ts';
 
 /** 两个维度各自的属性名与合法取值。 */
@@ -131,24 +131,26 @@ export async function shot(argv: string[], url: string | null, json: boolean): P
   let failure: unknown = null;
   try {
     for (const frontend of frontends) {
-      // 设备模拟（--device）只能在 open 时指定，改不了已有会话。所以每换一个
-      // 前端就重开浏览器：否则 mobile 那一轮会沿用 desktop 的 dpr 与 UA，
-      // min-resolution / pointer 之类的媒体查询全部走错分支。
-      //
-      // 注意：这与 SKILL 里「不要再 open 第二次」不冲突——那句话是给用户/agent
-      // 的手工操作说的；shot 必须重开才能换设备模拟，且结束时会把会话还原。
-      await restoreSession({ ...savedState, frontend, url: resolveFrontendUrl(frontend, url) });
-      const assignments: Array<[string, string]> = [];
-      if (theme) assignments.push([DIMENSIONS['--theme'].attribute, theme]);
-      if (density) assignments.push([DIMENSIONS['--density'].attribute, density]);
-      applyAttributes(assignments);
-      // 给主题 CSS/过渡一帧以上时间；否则可能截到切换中的状态。
-      if (assignments.length) await sleep(THEME_SWITCH_MS);
-
+      const attributes: Array<[string, string]> = [];
+      if (theme) attributes.push([DIMENSIONS['--theme'].attribute, theme]);
+      if (density) attributes.push([DIMENSIONS['--density'].attribute, density]);
+      const deviceName = deviceNameFor(frontend);
       const file = join(outDir, `${frontend}${suffix ? `-${suffix}` : ''}.png`);
-      // --hires 按设备像素截图（计入 dpr）。不加的话 mobile 仍输出 390x844 的
-      // CSS 像素图，在真机 3x 屏上相当于把 1170x2532 压缩了三分之一。
-      runCli(['screenshot', '--hires', `--filename=${file}`]);
+
+      // 一次 run-code 内完成「切设备 + 导航 + 设主题 + 截图」：
+      // Page.captureScreenshot 只在设置设备覆盖的那个 CDP 会话里看到设备参数，
+      // 拆成两次调用会退回 CSS 像素尺寸（实测 390x664 而不是 1170x1992）。
+      const captured = runCode(
+        captureScript({
+          profile: deviceName ? deviceProfile(deviceName) : null,
+          url: resolveFrontendUrl(frontend, url),
+          attributes,
+          settleMs: THEME_SWITCH_MS,
+        })
+      ) as { data?: unknown } | null;
+      const data = typeof captured?.data === 'string' ? captured.data : null;
+      if (!data) throw new EnvironmentError('截图失败：CDP 没有返回图像数据');
+      writeFileSync(file, Buffer.from(data, 'base64'));
       files.push(file);
     }
   } catch (cause) {

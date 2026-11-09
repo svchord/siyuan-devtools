@@ -1,26 +1,30 @@
 /**
  * 会话命令：open / reload / status / close。
  *
- * `open` 只调一次；会话已存在时加载新产物用 `reload`（内部 goto），
+ * `open` 起浏览器；已有会话上加载新产物用 `reload`（内部 goto），
  * 因为 playwright-core cli 的 open 会杀掉旧 Chrome 起一个新的。
  *
- * ## 设备模拟只能在 open 时指定
+ * ## 设备模拟不必重开浏览器
  *
- * `--device` 是 `open` 的参数，已有会话改不了。所以凡是「前端变了」的场景
- * （`reload --frontend mobile`、`audit` 的 mobile 计划）都必须**重开浏览器**，
- * 否则 dpr 停在 1、UA 还是桌面，`min-resolution` / `pointer: coarse`
- * 全部走错分支——测出来的不是真实移动端。
+ * `--device` 是 `open` 的参数，但已有会话也能就地切设备：走 CDP 的
+ * Emulation 域（见 `device.ts`），实测与 `open --device` 逐项一致。
+ * 所以 `reload --frontend mobile`、`audit` 的 mobile 计划、`shot` 的多前端
+ * 都可以在同一个会话里完成，不必杀掉用户的浏览器。
  *
- * 判断依据是**页面上实际的前端**，不是状态文件：状态文件可能被删、写失败，
- * 或者会话是别的工具开的，那时代码不能假设「没状态就是没变」。
+ * 唯一的额外要求：切换后必须**重新导航**，因为 `navigator.maxTouchPoints`
+ * 与 `'ontouchstart' in window` 在页面加载时固化。
+ *
+ * 判断「当前是什么前端」用**页面上实际的 data-frontend**，不是状态文件：
+ * 状态文件可能被删、写失败，或者会话是别的工具开的。
  *
  * 状态提示走 stderr（clig.dev：日志走 stderr，数据走 stdout），
  * 这样 `... --json | jq` 不会被「已打开」这类话打断。
  */
 import { lastValue, parseArgs } from '../args.ts';
+import { deviceNameFor, deviceProfile, deviceScript } from '../device.ts';
 import { UserError } from '../errors.ts';
 import { note, output } from '../format.ts';
-import { ensureWorkspace, evalScript, listSessions, runCli, sessionExists } from '../playwright.ts';
+import { ensureWorkspace, evalScript, listSessions, runCli, runCode, sessionExists } from '../playwright.ts';
 import { ENV_FN, evalExpr, READY_FN, SNAPSHOT_ROOT_FN } from '../script/recipe.ts';
 import { clearState, readState, writeState } from '../session-state.ts';
 import type { SessionState } from '../session-state.ts';
@@ -88,18 +92,18 @@ export function currentFrontend(): Frontend | null {
 }
 
 /**
- * 前端对应的默认模拟设备。
+ * 前端对应的默认模拟设备（仅用于 `open` 时的原生设备模拟）。
  *
  * 只设视口尺寸是不够的：真实移动端的 dpr 是 3，UA 也是移动端。
  * 少了设备模拟，`@media (min-resolution: 2dppx)`、`pointer: coarse`
  * 以及依赖 UA 的样式分支都不会生效，测出来的不是真实移动端。
  */
-export const MOBILE_DEVICE = 'iPhone 13';
+export { MOBILE_DEVICE } from '../device.ts';
 
 /** 打开浏览器时要带上的设备模拟参数（desktop 不需要）。 */
 export function deviceArgsFor(frontend: Frontend, device: string | null = null): string[] {
-  if (device) return [`--device=${device}`];
-  return frontend === 'mobile' ? [`--device=${MOBILE_DEVICE}`] : [];
+  const name = deviceNameFor(frontend, device);
+  return name ? [`--device=${name}`] : [];
 }
 
 /** 一次 launch 的入参。 */
@@ -110,25 +114,60 @@ export interface LaunchOptions {
 }
 
 /**
- * 重开浏览器并打开指定前端。
+ * 在**现有会话**上就地切换设备模拟。
  *
- * `open` 会杀掉同 workspace 的旧 Chrome 起新的，所以不需要先 close。
+ * 走 CDP 的 Emulation 域，与 `open --device` 等价（实测 innerWidth / dpr /
+ * screen / UA / pointer / hover / min-resolution / orientation 全部一致），
+ * 但不用杀掉浏览器。切换后必须重新导航：`navigator.maxTouchPoints` 与
+ * `'ontouchstart' in window` 在页面加载时固化。
+ *
+ * 不传 device 时显式写回桌面参数（不能只 clear，clear 不会复原 dpr/UA）。
+ */
+export function applyDevice(frontend: Frontend, device: string | null = null, desktopViewport?: Viewport): void {
+  const name = deviceNameFor(frontend, device);
+  runCode(deviceScript(name === null ? null : deviceProfile(name), desktopViewport));
+}
+
+/**
+ * 打开浏览器（或复用已有会话）并切到目标前端。
+ *
+ * 已有会话时**不再重开**：用 CDP 切设备。只有会话不存在时才真开浏览器。
+ *
+ * 顺序很关键：**先 goto 再 applyDevice**。CDP 的 Emulation 覆盖绑定在
+ * 当前文档上，导航到新文档会把它清掉；反过来做的话，`shot` 的 mobile 那一轮
+ * 会拍到 1600x1000 的桌面尺寸。
+ *
+ * 切完再 reload 一次：`navigator.maxTouchPoints` 与 `'ontouchstart' in window`
+ * 在文档创建时固化，不 reload 的话 `hasTouch` 仍是 false。
  *
  * 视口规则（三条路径必须一致，否则同一个前端会有两种测量视口）：
  *  - 显式 viewport ⇒ 用它；
- *  - 有设备模拟 ⇒ 用设备自带视口（`iPhone 13` 是 390x664），不要再 resize；
+ *  - 有设备模拟 ⇒ 用设备自带视口，不要再 resize；
  *  - 都没有 ⇒ 用前端预设视口。
  */
 export async function launch(frontend: Frontend, url: string, options: LaunchOptions = {}): Promise<void> {
   ensureWorkspace();
   const device = options.device ?? null;
-  const deviceArgs = deviceArgsFor(frontend, device);
-  const args = ['open', '--browser=chrome', ...deviceArgs];
-  if (options.headed) args.push('--headed');
-  args.push(url);
-  runCli(args);
-  if (options.viewport) applyViewport(options.viewport);
-  else if (!deviceArgs.length) applyViewport(viewportFor(frontend));
+  const deviceName = deviceNameFor(frontend, device);
+  const reuse = sessionExists();
+
+  // 这次要用的视口：显式 viewport 优先，否则设备自带，否则前端预设。
+  const viewport = options.viewport ?? (deviceName ? null : viewportFor(frontend));
+
+  if (reuse) {
+    // 复用会话：先导航到目标页，再套设备模拟，最后 reload 让 touch 生效。
+    runCli(['goto', url]);
+    applyDevice(frontend, device, viewport ?? undefined);
+    runCli(['reload']);
+  } else {
+    // 新会话：设备模拟直接由 open 原生完成，不用 CDP。
+    const args = ['open', '--browser=chrome', ...deviceArgsFor(frontend, device)];
+    if (options.headed) args.push('--headed');
+    args.push(url);
+    runCli(args);
+    if (viewport) applyViewport(viewport);
+  }
+
   await waitForReady();
   captureRootSnapshot();
 }
@@ -180,18 +219,10 @@ export async function reload(argv: string[], url: string | null): Promise<void> 
   const frontend = requestedFrontend ?? actual ?? state?.frontend ?? 'desktop';
   const targetUrl = resolveFrontendUrl(frontend, url);
 
-  // 判断依据是页面上实际的前端：状态文件可能缺失/过期，不能假设「没状态就是没变」。
-  const frontendChanged = actual !== null && actual !== frontend;
-  const device = frontendChanged ? null : state?.device ?? null;
-  if (frontendChanged) {
-    await launch(frontend, targetUrl, { device, viewport });
-  } else {
-    if (viewport) applyViewport(viewport);
-    runCli(['goto', targetUrl]);
-    await waitForReady();
-    captureRootSnapshot();
-  }
-  writeState({ url: targetUrl, frontend, device, viewport });
+  // 设备跟着前端走：切到 mobile 就模拟真机，切回 desktop 就清掉设备模拟。
+  // `launch` 会就地用 CDP 切换（不重开浏览器），再 goto。
+  await launch(frontend, targetUrl, { device: state?.device ?? null, viewport });
+  writeState({ url: targetUrl, frontend, device: state?.device ?? null, viewport });
   note(`已重新加载：${targetUrl}`);
 }
 

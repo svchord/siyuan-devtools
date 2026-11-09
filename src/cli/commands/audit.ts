@@ -11,12 +11,12 @@ import { applyViewport, captureRootSnapshot, currentFrontend, launch, waitForRea
 /**
  * audit 是唯一自动创建会话的命令（计划里已声明 frontend）。
  *
- * 已有会话且前端不同时必须重开：设备模拟（dpr/UA）只能在 open 时指定，
+ * 已有会话且前端不同时，用 CDP 就地切设备（不重开浏览器）——
  * 否则 mobile 计划会跑在 desktop 的 dpr=1 上，`min-resolution` /
  * `pointer: coarse` 全部走错分支。
  *
- * 复用会话时**不要**无条件 resize：mobile 会话带着 iPhone 13 的设备视口
- * （390x664），resize 成 390x844 会让同一个前端在 open 与 audit 两条路径上
+ * 复用会话时不要 resize 掉设备自带视口：mobile 会话带着 iPhone 13 的
+ * 390x664，resize 成 390x844 会让同一个前端在 open 与 audit 两条路径上
  * 给出不同测量视口。
  */
 export async function audit(args: string[], json: boolean, url: string | null): Promise<void> {

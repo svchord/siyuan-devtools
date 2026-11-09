@@ -47,7 +47,8 @@ npx siyuan-devtools install --skills    # 给 agent 装一页 skill
 ```
 
 `--frontend mobile` 默认模拟 iPhone 13（视口 390x664，dpr 3）；`desktop` 默认 1600x1000。
-`--device` 只在 `open` 时生效，所以 `reload` / `audit` / `shot` 在切换前端时会重开浏览器。
+`--device` 只在 `open` 时用原生设备模拟；已有会话上切换前端时，`reload` / `audit` / `shot`
+会改用 CDP 就地切换设备参数（dpr / UA / touch / pointer 全部一致），不重开浏览器。
 
 ## 工作流
 

@@ -16,7 +16,7 @@ siyuan-devtools close                       # 关闭
 ```
 
 `open` 只调一次。**不要再 open 第二次**——它会杀掉旧 Chrome 起一个新的。
-（`reload` / `audit` / `shot` 内部可能重开浏览器，那是它们的职责，且会还原会话。）
+（`reload` / `audit` / `shot` 切换前端时会在原会话里就地切设备模拟，不会杀掉你的浏览器。）
 
 ## 改完源码后
 
@@ -89,7 +89,7 @@ siyuan-devtools shot --theme dark --density compact       # 两个维度可组�
 ```
 
 `--frontend mobile` 默认模拟 iPhone 13（390x664，dpr 3）；桌面端默认 1600x1000。
-`shot` 会为每个前端重开浏览器（设备模拟只能在 open 时指定），结束时把会话还原到截图前的状态。
+`shot` 会为每个前端就地切换设备模拟（不重开浏览器），结束时把会话还原到截图前的状态。
 
 ## 约定
 
