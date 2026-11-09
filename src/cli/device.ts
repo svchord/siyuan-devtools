@@ -13,6 +13,7 @@
  */
 import { devices } from 'playwright-core';
 import { UserError } from './errors.ts';
+import { THEME_FN } from './script/recipe.ts';
 import type { Frontend } from './url.ts';
 
 /** 移动端默认模拟的设备。 */
@@ -25,7 +26,7 @@ export const MOBILE_DEVICE = 'iPhone 13';
  * 覆盖它（旧工具与 README 一直以 390x844 作为移动端 CSS 视口，截图因此是
  * 1170x2532）。设备只负责 dpr / UA / touch 这几个「不能靠 resize 得到」的维度。
  */
-interface DeviceProfile {
+export interface DeviceProfile {
   width: number;
   height: number;
   screenWidth: number;
@@ -130,15 +131,37 @@ export function deviceScript(
  * `Page.captureScreenshot` 只在**设置覆盖的那个 CDP 会话**内看到设备参数。
  * 换一次调用重新 `newCDPSession`，虽然页面里 `devicePixelRatio` 仍是 3
  * （evaluate 读得到），但截图会退回 390x664 的 CSS 像素。
+ *
+ * 等待分三层，缺一层就会截到中间态：
+ *  1. `isReady`——等界面真正可用（只等 `config` 会截到启动闪屏）；
+ *  2. 维度改动后的 `settleMs`——等主题样式表换完触发重排；
+ *  3. 两帧 rAF——等浏览器把这一帧真的画出来。
+ * 第 3 层**无条件**执行：没有维度改动时它依然负责「等首帧绘制」，
+ * 这也是 `shot`（无参数）曾经截到闪屏的原因之一。
+ *
+ * `mode` / `density` 为空表示不改该维度；`mode` 走 `THEME_FN` 是因为换主题
+ * 不只是改属性，还要换 `<link>` 样式表（见 recipe.ts 里 THEME_FN 的说明）。
+ *
+ * `extra` 是插在「维度落定」与「截图」之间的页面动作（`audit` 用它把整份
+ * 计划跑在同一个 run-code 里）。它产出的是**语句**，可以往 `steps` 变量里
+ * 推结果；截图之后这些结果会随 `data` 一起返回，省掉一次子进程。
  */
 export function captureScript(options: {
   profile: DeviceProfile | null;
   viewport: { width: number; height: number };
   url: string;
-  attributes: ReadonlyArray<readonly [string, string]>;
+  mode: 'light' | 'dark' | null;
+  density: 'default' | 'compact' | null;
   settleMs: number;
+  extra?: { statements: string; resultsVar: string } | null;
+  /**
+   * 是否真的截图。`false` 时只做「切设备 + 导航 + 设维度 + 等就绪」，
+   * 供 `--at` 跨前端切换用：那条路径只要一个可用页面，不要 PNG，
+   * 而 `launch` 要 4–5 次子进程，这里合成一次。
+   */
+  screenshot?: boolean;
 }): string {
-  const { profile, viewport, url, attributes, settleMs } = options;
+  const { profile, viewport, url, mode, density, settleMs, extra = null, screenshot = true } = options;
   const metrics = profile
     ? {
         width: viewport.width,
@@ -152,9 +175,34 @@ export function captureScript(options: {
     : { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: false };
   const touch = profile?.hasTouch ?? false;
   const userAgent = profile?.userAgent ?? '';
-  const assignment = attributes
-    .map(([name, value]) => `document.documentElement.setAttribute(${JSON.stringify(name)}, ${JSON.stringify(value)});`)
-    .join(' ');
+
+  // 维度步骤只做赋值，不声明变量：声明统一放在脚本头部，避免某个维度
+  // 缺席时 `applied` 里的字段变成未声明标识符。
+  //
+  // 密度必须经 `page.evaluate` 改：run-code 的脚本体跑在 Node 里，
+  // 这里没有 `document`。
+  const themeStep =
+    mode === null
+      ? ''
+      : `  const theme = await page.evaluate(${THEME_FN}, ${JSON.stringify(mode)});
+  appliedMode = theme?.mode ?? ${JSON.stringify(mode)};
+  themeChanged = theme?.changed === true;
+`;
+  const densityStep =
+    density === null
+      ? ''
+      : density === 'compact'
+        ? `  densityValue = await page.evaluate(() => {
+    document.documentElement.setAttribute('data-ui-density', 'compact');
+    return 'compact';
+  });
+`
+        : `  densityValue = await page.evaluate(() => {
+    document.documentElement.removeAttribute('data-ui-density');
+    return 'default';
+  });
+`;
+  const hasDimensions = mode !== null || density !== null;
 
   return `async (page) => {
   const session = await page.context().newCDPSession(page);
@@ -162,19 +210,38 @@ export function captureScript(options: {
   await session.send('Emulation.setTouchEmulationEnabled', { enabled: ${touch}${touch ? ', maxTouchPoints: 5' : ''} });
   await session.send('Emulation.setUserAgentOverride', { userAgent: ${JSON.stringify(userAgent)} });
   await page.goto(${JSON.stringify(url)});
-  // 等思源前端初始化完成（与 READY_FN 同条件），最多 15s。
+  // 等思源前端真正就绪（与 READY_FN 同条件），最多 15s。
+  // 不能等启动早期的 config 对象：它在 ~78ms 就为真，会截到启动闪屏。
   await page.waitForFunction(
-    () => Boolean(window.siyuan?.config && document.documentElement.getAttribute('data-frontend')),
+    () => Boolean(window.siyuan?.isReady === true && document.documentElement.getAttribute('data-frontend')),
     undefined,
     { timeout: 15000 }
   );
-  ${
-    assignment
-      ? `await page.evaluate(() => { ${assignment} });\n  await page.waitForTimeout(${settleMs});`
+  let appliedMode = null;
+  let themeChanged = false;
+  let densityValue = null;
+${themeStep}${densityStep}${
+    hasDimensions
+      ? `  // 主题换表/密度改属性都会触发重排，等它落定再截。
+  await page.waitForTimeout(${settleMs});
+`
       : ''
-  }
-  const shot = await session.send('Page.captureScreenshot', { format: 'png' });
-  return { data: shot.data };
+  }${extra === null ? '' : `${extra.statements}`}  // 两帧 rAF 后读一次布局：rAF 只保证「这一帧要画」，读布局才会强制浏览器
+  // 把挂起的样式与排版算完，否则 CDP 可能仍拿到上一帧的位图。
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
+    document.documentElement.getBoundingClientRect();
+    resolve(true);
+  }))));
+${
+  screenshot
+    ? `  const shot = await session.send('Page.captureScreenshot', { format: 'png' });
+  return { data: shot.data, applied: { mode: appliedMode, changed: themeChanged, density: densityValue }${
+      extra === null ? '' : `, steps: ${extra.resultsVar}`
+    } };`
+    : `  return { applied: { mode: appliedMode, changed: themeChanged, density: densityValue }${
+        extra === null ? '' : `, steps: ${extra.resultsVar}`
+      } };`
+}
 }`;
 }
 

@@ -117,9 +117,63 @@ function runCliRaw(args: string[]): RawCliResult {
   };
 }
 
+/**
+ * 从 cli 的输出里捞出真正的错误正文。
+ *
+ * playwright-cli 把错误写成横幅 + 围栏的形式：
+ *
+ * ```
+ * ### Error
+ * ### Ran Playwright code
+ * ```js
+ * ...
+ * ```
+ * Error: Error: strict mode violation: locator('.dock__item') resolved to 9 elements
+ * ```
+ *
+ * 真正的消息在 stdout 里，stderr 只有 10 个字节的 `### Error`。旧实现取
+ * `firstLine(stderr)`，于是 agent 只拿到「### Error」——对排查毫无用处，
+ * 只能反复重试，每轮都是完整的 spawn。
+ *
+ * 所以这里按行扫：跳过横幅、围栏与标题，取第一条正文；重复的 `Error: `
+ * 前缀要剥掉（嵌套两层很常见）。
+ */
+export function extractErrorText(stdout: string, stderr: string, status: number | null): string {
+  const isBanner = (text: string): boolean =>
+    text === '### Error' || text === '### Ran Playwright code' || /^#{2,}\s/.test(text);
+  const firstUseful = (text: string): string | null => {
+    // 围栏里的内容是 Playwright 回显的代码，不是错误正文；只看围栏标记行
+    // 不够——`await page.locator(...).hover();` 这种回显会被当成第一条消息。
+    const lines = text.split('\n');
+    // 围栏没闭合说明输出被截断，此时无法区分回显与正文，只能退化成
+    // 「跳过围栏标记本身」，否则真实错误会被整段吞掉。
+    const balanced = lines.filter((line) => line.trim().startsWith('```')).length % 2 === 0;
+    let fenced = false;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('```')) {
+        if (balanced) fenced = !fenced;
+        continue;
+      }
+      if (fenced || !trimmed) continue;
+      if (isBanner(trimmed)) continue;
+      return trimmed;
+    }
+    return null;
+  };
+  const raw = firstUseful(stderr) ?? firstUseful(stdout);
+  if (raw === null) return `playwright-cli 退出码 ${String(status)}`;
+  // `Error: Error: ...` 最多剥三层；再多的前缀多半是消息本身的一部分。
+  let message = raw;
+  for (let depth = 0; depth < 3 && message.startsWith('Error: '); depth += 1) {
+    message = message.slice('Error: '.length).trim();
+  }
+  return message.length > 0 ? message : `playwright-cli 退出码 ${String(status)}`;
+}
+
 /** 一条命令失败时的错误消息。 */
 function failureMessage(result: RawCliResult): string {
-  return firstLine(result.err || result.out || `playwright-cli 退出码 ${String(result.status)}`);
+  return extractErrorText(result.out, result.err, result.status);
 }
 
 /** 执行一条 playwright-core cli 命令（不加额外输出开关）。 */

@@ -52,9 +52,14 @@ function splitAction(step: PlanStep): { action: string; arg: string } {
   return { action, arg };
 }
 
-/** 把一步编译成 run-code 里的一行异步调用。 */
-function compileStep(step: PlanStep, index: number): string {
-  const push = `results.push({ step: ${index}, value: `;
+/**
+ * 把一步编译成 run-code 里的一行异步调用。
+ *
+ * `resultsVar` 是结果数组的变量名：默认 `results`（`compilePlan` 用），
+ * `audit` 的合并脚本用别的名字，避免与它自己的变量撞车。
+ */
+function compileStep(step: PlanStep, index: number, resultsVar = 'results'): string {
+  const push = `${resultsVar}.push({ step: ${index}, value: `;
   const settle = `await new Promise((resolve) => setTimeout(resolve, ${ACTION_SETTLE_MS}));`;
 
   if (step.do !== undefined) {
@@ -120,7 +125,7 @@ function compileStep(step: PlanStep, index: number): string {
  * run-code 只把 `page` 传进脚本，Node 侧函数（对比度计算）进不去，
  * 所以只能把颜色带回来、在 Node 里补算。
  */
-function fillContrastRatios(plan: Plan, results: unknown): unknown {
+export function fillContrastRatios(plan: Plan, results: unknown): unknown {
   if (!Array.isArray(results)) return results;
   return results.map((item, index) => {
     if (plan.steps[index]?.read !== 'contrast') return item;
@@ -136,8 +141,19 @@ export function runPlan(plan: Plan): unknown {
   return fillContrastRatios(plan, runCode(compilePlan(plan)));
 }
 
+/**
+ * 只编译 steps 的语句部分，供调用方嵌进自己的 run-code。
+ *
+ * `audit` 要把「跑计划」和「截图」放进同一次 run-code：分开是两次 node
+ * 子进程（各 ~1.5s），6 格就是 12 次。这里只产出语句，结果推进调用方给的
+ * 变量名，`return` 与收尾由调用方负责。
+ */
+export function compilePlanStatements(plan: Plan, resultsVar: string): string {
+  const body = plan.steps.map((step, index) => `  ${compileStep(step, index, resultsVar)}`).join('\n');
+  return `  const ${resultsVar} = [];\n${body}\n`;
+}
+
 /** 编译后的完整脚本（供测试读回）。 */
 export function compilePlan(plan: Plan): string {
-  const body = plan.steps.map((step, index) => `  ${compileStep(step, index)}`).join('\n');
-  return `async (page) => {\n  const results = [];\n${body}\n  return results;\n}`;
+  return `async (page) => {\n${compilePlanStatements(plan, 'results')}  return results;\n}`;
 }

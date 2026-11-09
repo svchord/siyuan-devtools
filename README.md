@@ -15,15 +15,15 @@ npx siyuan-devtools install --skills    # 给 agent 装一页 skill
 
 ```
 会话
-  siyuan-devtools open [--frontend desktop|mobile] [--device "iPhone 13"] [--viewport 390x844] [--headed]
-  siyuan-devtools reload [--frontend desktop|mobile] [--viewport 390x844]
-  siyuan-devtools status [--json]
+  siyuan-devtools open [--frontend desktop|mobile] [--device "iPhone 13"] [--viewport 390x844] [--theme light|dark] [--density default|compact] [--headed]
+  siyuan-devtools reload [--frontend desktop|mobile] [--viewport 390x844] [--theme light|dark] [--density default|compact]
+  siyuan-devtools status [--raw]   默认给测量状态（open/frontend/theme/density/url/viewport），--raw 才是 playwright 会话列表
   siyuan-devtools close
 
 读数
   siyuan-devtools read env
   siyuan-devtools read tokens <name...>
-  siyuan-devtools read element <selector> [--props a,b] [--box] [--limit N]
+  siyuan-devtools read element <selector> [--props a,b] [--box [--limit N]] [--meta]
   siyuan-devtools read contrast <fg> <bg>    # fg/bg 可以是令牌名，也可以是 #fff / rgb(...) / hsl(...)
 
 动作（click/hover/dblclick/fill/drag/select 支持 --diff a,b）
@@ -42,13 +42,53 @@ npx siyuan-devtools install --skills    # 给 agent 装一页 skill
   siyuan-devtools do reset
 
 批量 / 产物
-  siyuan-devtools audit <plan.json> [--json]
-  siyuan-devtools shot [--frontend both|desktop|mobile] [--theme dark|light] [--density comfortable|compact] [--out shots]
+  siyuan-devtools audit <plan.json> [--json]     # 计划可带 axes，一次跑完所有模式
+  siyuan-devtools shot [--frontend both|desktop|mobile] [--theme light,dark] [--density default,compact] [--out shots]
+  siyuan-devtools shot --at all --out shots       # 同上，用格语法表达
+```
+
+`--theme` / `--density` 都接受逗号多值，展开成「前端 × 明暗 × 密度」的格子，一条命令出全部截图；
+文件名带生效维度（`desktop-light-compact.png`）。移动端没有紧凑模式（上游 `isCompactModeAvailable`
+只允许桌面系），`mobile × compact` 会被跳过并在 stderr 说明原因。
+
+## 测量格（`--at`）
+
+三个维度（frontend / theme / density）可以写成**一个格** `desktop/dark/default`，
+任何读数与动作都能用 `--at` 指定，一条命令在多个格上取值：
+
+```bash
+siyuan-devtools read tokens --brand-8 --at all
+siyuan-devtools read element .b3-menu__item --props color --at desktop/dark
+siyuan-devtools read contrast --rc-text-primary --rc-bg-page --at desktop/dark
+siyuan-devtools do hover .b3-menu__item --diff color --at desktop/dark/default
+```
+
+`--at` 取值：`all` 或 `frontend[/theme[/density]]`，逗号分隔多段。省略的段按该段全部取值展开
+（`desktop` = 4 格，`desktop/dark` = 2 格）。合法域由工具定义：desktop 4 格 + mobile 2 格 = 6 格，
+`mobile/compact` 不存在。
+
+多格输出是一张表：列只写一次、行是纯值数组，所有格相同的列折叠进 `same`。`--at` 是纯命令，
+执行完会把页面还原到进入前的格；`do --at` 例外（它就是要改变页面状态）。
+
+计划文件也可以声明轴，效果与 `--at all` 相同：
+
+```json
+{
+  "axes": { "frontend": ["desktop", "mobile"], "theme": ["light", "dark"], "density": ["default", "compact"] },
+  "steps": [ { "read": "tokens", "names": ["--brand-8"] } ],
+  "shots": { "out": "shots" }
+}
 ```
 
 `--frontend mobile` 默认模拟 iPhone 13（dpr 3、移动端 UA、touch），CSS 视口仍是 390x844；`desktop` 默认 1600x1000 与 dpr 1。
 `--device` 只在 `open` 时用原生设备模拟；已有会话上切换前端时，`reload` / `audit` / `shot`
 会改用 CDP 就地切换设备参数（dpr / UA / touch / pointer 全部一致），不重开浏览器。
+
+`--theme` 不只是改 `data-theme-mode` 属性：内置 daylight/midnight 的配色是两张独立 CSS，
+所以切换时会一并换掉 `#themeDefaultStyle` / `#themeStyle` 的 `href`。只改属性对内置主题无效。
+
+`reload` 会重放会话里记录的 `--theme` / `--density`：导航会把它们重置回思源配置，
+不重放的话「设暗色 → 改 CSS → reload → 测量」会静默测成亮色。
 
 ## 工作流
 
@@ -75,7 +115,7 @@ npx siyuan-devtools install --skills    # 给 agent 装一页 skill
 
 `open` 会起新 Chrome；会话按 Playwright 的 workspace（向上查找 `.playwright/`）隔离。同一 workspace 已有会话时不要重复 `open`（它会杀掉旧的），加载新产物用 `reload`。
 
-会话状态（入口 URL、前端、设备、视口）记在 `.playwright/siyuan-devtools.json`，所以 `reload` / `audit` / `shot` 不带 `--url` 时会沿用 `open` 时的实例。
+会话状态（入口 URL、前端、设备、视口、明暗、密度）记在 `.playwright/siyuan-devtools.json`，所以 `reload` / `audit` / `shot` 不带 `--url` 时会沿用 `open` 时的实例，`reload` 也会重放明暗与密度。
 
 ## 环境变量
 

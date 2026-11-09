@@ -151,3 +151,42 @@ describe('parsePlan', () => {
     expect(parsePlan({ ...VALID, viewport: '390x844' }).ok).toBe(true);
   });
 });
+
+describe('axes 与 shots', () => {
+  const WITH_AXES = {
+    axes: { frontend: ['desktop', 'mobile'], theme: ['light', 'dark'], density: ['default', 'compact'] },
+    steps: [{ read: 'tokens', names: ['--brand-8'] }],
+  };
+
+  it('axes 计划合法，不要求 frontend', () => {
+    expect(parsePlan(WITH_AXES).ok).toBe(true);
+  });
+
+  it('只给 axes.theme 也合法（其余轴取全部）', () => {
+    expect(parsePlan({ axes: { theme: ['dark'] }, steps: [{ read: 'env' }] }).ok).toBe(true);
+  });
+
+  it('frontend 与 axes.frontend 同时给时报错', () => {
+    expect(firstError({ ...WITH_AXES, frontend: 'desktop' })).toContain('不能同时给');
+  });
+
+  it('两个都不给时报错', () => {
+    expect(firstError({ steps: [{ read: 'env' }] })).toContain('frontend 或 axes');
+  });
+
+  it('axes 取值不合法时报错', () => {
+    expect(firstError({ ...WITH_AXES, axes: { theme: ['medium'] } })).toContain('axes.theme');
+    expect(firstError({ ...WITH_AXES, axes: { density: ['comfortable'] } })).toContain('axes.density');
+  });
+
+  it('axes 里出现未知字段时报错，不静默忽略', () => {
+    expect(firstError({ ...WITH_AXES, axes: { frontend: ['desktop'], themeMode: ['dark'] } })).toContain('未知字段');
+  });
+
+  it('shots 只接受 out 字段', () => {
+    expect(parsePlan({ ...WITH_AXES, shots: {} }).ok).toBe(true);
+    expect(parsePlan({ ...WITH_AXES, shots: { out: 'shots' } }).ok).toBe(true);
+    expect(firstError({ ...WITH_AXES, shots: { dir: 'shots' } })).toContain('未知字段');
+    expect(firstError({ ...WITH_AXES, shots: { out: '' } })).toContain('不能为空');
+  });
+});

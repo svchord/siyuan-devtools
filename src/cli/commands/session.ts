@@ -14,6 +14,13 @@
  * 唯一的额外要求：切换后必须**重新导航**，因为 `navigator.maxTouchPoints`
  * 与 `'ontouchstart' in window` 在页面加载时固化。
  *
+ * ## 为什么 open/reload 也接受 --theme / --density
+ *
+ * 导航会把这两个维度重置回思源配置（实测 dark → reload → light），所以
+ * 「设暗色 → 改 CSS → reload → 测量」这条最常用的循环，如果不重放，测的就是
+ * 亮色，而且退出码 0。把它们记进会话状态、并在每次 `reload` 之后重放，
+ * 这条循环才不需要 agent 自己维护隐藏状态。
+ *
  * 判断「当前是什么前端」用**页面上实际的 data-frontend**，不是状态文件：
  * 状态文件可能被删、写失败，或者会话是别的工具开的。
  *
@@ -22,16 +29,18 @@
  */
 import { lastValue, parseArgs } from '../args.ts';
 import { deviceNameFor, deviceProfile, deviceScript } from '../device.ts';
+import { DIMENSIONS, parseDimension, isThemeMode } from '../dimensions.ts';
+import type { Density, ThemeMode } from '../dimensions.ts';
 import { UserError } from '../errors.ts';
 import { note, output } from '../format.ts';
 import { ensureWorkspace, evalScript, listSessions, runCli, runCode, sessionExists } from '../playwright.ts';
-import { ENV_FN, evalExpr, READY_FN, SNAPSHOT_ROOT_FN } from '../script/recipe.ts';
+import { ATTR_FN, ENV_FN, evalExpr, READY_FN, SNAPSHOT_ROOT_FN, THEME_FN } from '../script/recipe.ts';
 import { clearState, readState, writeState } from '../session-state.ts';
 import type { SessionState } from '../session-state.ts';
 import { READY_TIMEOUT_MS } from '../timing.ts';
 import { parseFrontend, resolveFrontendUrl } from '../url.ts';
 import type { Frontend } from '../url.ts';
-import { sleep } from '../util.ts';
+import { sleep, isRecord } from '../util.ts';
 import { parseViewport, viewportFor } from '../viewport.ts';
 import type { Viewport } from '../viewport.ts';
 
@@ -111,6 +120,10 @@ export interface LaunchOptions {
   device?: string | null;
   viewport?: Viewport | null;
   headed?: boolean;
+  /** 打开后要应用的明暗；null / 省略表示不指定。 */
+  theme?: ThemeMode | null;
+  /** 打开后要应用的密度；null / 省略表示不指定。 */
+  density?: Density | null;
 }
 
 /**
@@ -134,6 +147,31 @@ export function applyDevice(
 }
 
 /**
+ * 应用明暗与密度。
+ *
+ * 明暗走 `THEME_FN`：只写 `data-theme-mode` 对内置 daylight/midnight 无效
+ * （配色是两张独立 CSS），必须同时换 `#themeDefaultStyle` / `#themeStyle`
+ * 的 href。密度只是属性有无：`compact` 设值，`default` 删属性。
+ *
+ * 两个维度都没传时什么都不做——不能顺手把密度删掉，否则
+ * `reload --theme dark` 会悄悄把用户设的紧凑模式清掉。
+ */
+export function applyDimensions(theme: ThemeMode | null, density: Density | null): void {
+  if (theme !== null) {
+    // THEME_FN 内部会等新样式表 load 完再返回（eval 会 await 页面侧的 promise），
+    // 所以这里不需要再补 sleep。
+    evalScript(evalExpr(THEME_FN, theme));
+  }
+  if (density !== null) {
+    // 复用 recipe 的 ATTR_FN（值为 null 即删属性）：属性读写的转义规则只写一份。
+    evalScript(evalExpr(ATTR_FN, [DENSITY_ATTR, density === 'compact' ? 'compact' : null]));
+  }
+}
+
+/** `data-ui-density` 的属性名；密度只在这一个属性上表达。 */
+const DENSITY_ATTR = DIMENSIONS['--density'].attribute;
+
+/**
  * 打开浏览器（或复用已有会话）并切到目标前端。
  *
  * 已有会话时**不再重开**：用 CDP 切设备。只有会话不存在时才真开浏览器。
@@ -144,6 +182,9 @@ export function applyDevice(
  *
  * 切完再 reload 一次：`navigator.maxTouchPoints` 与 `'ontouchstart' in window`
  * 在文档创建时固化，不 reload 的话 `hasTouch` 仍是 false。
+ *
+ * 维度必须放在**导航与 reload 之后**：导航会重置 `data-theme-mode`，
+ * 先设后导航等于没设。
  *
  * 视口规则（三条路径必须一致，否则同一个前端会有两种测量视口）：
  *  - 显式 viewport ⇒ 用它；
@@ -175,24 +216,30 @@ export async function launch(frontend: Frontend, url: string, options: LaunchOpt
   }
 
   await waitForReady();
+  // 维度在就绪之后应用：页面还没挂主题时设属性，会被随后的初始化覆盖。
+  applyDimensions(options.theme ?? null, options.density ?? null);
   captureRootSnapshot();
 }
 
 /**
  * 恢复一个已保存的会话（shot 结束时用）。
  *
- * 与 `launch` 的区别：状态里可能记录了显式 viewport 和设备，两者要一起还原。
+ * 与 `launch` 的区别：状态里可能记录了显式 viewport、设备与维度，要一起还原。
  */
 export async function restoreSession(state: SessionState): Promise<void> {
   await launch(state.frontend, state.url, {
     device: state.device,
     viewport: state.viewport,
+    // 旧状态文件里没有这两个字段：缺省即「不指定」，别把它当成 null 传下去
+    // （exactOptionalPropertyTypes 下 undefined 与 null 是两种类型）。
+    theme: state.theme ?? null,
+    density: state.density ?? null,
   });
 }
 
 export async function open(argv: string[], url: string | null): Promise<void> {
   const parsed = parseArgs(argv, {
-    valueFlags: ['--frontend', '--device', '--viewport'],
+    valueFlags: ['--frontend', '--device', '--viewport', '--theme', '--density'],
     booleanFlags: ['--headed'],
     allowUnknown: false,
   });
@@ -200,23 +247,32 @@ export async function open(argv: string[], url: string | null): Promise<void> {
   const device = lastValue(parsed, '--device') ?? null;
   const viewportRaw = lastValue(parsed, '--viewport');
   const viewport = viewportRaw === undefined ? null : parseViewport(viewportRaw);
+  // 与 shot 共用同一套取值校验：两处各写一份必然漂移（旧实现就多出一个
+  // 上游不存在的 comfortable）。
+  const theme = parseDimension('--theme', lastValue(parsed, '--theme'));
+  const density = parseDimension('--density', lastValue(parsed, '--density'));
   const targetUrl = resolveFrontendUrl(frontend, url);
 
-  await launch(frontend, targetUrl, { device, viewport, headed: parsed.flags.has('--headed') });
-  writeState({ url: targetUrl, frontend, device, viewport });
+  await launch(frontend, targetUrl, { device, viewport, headed: parsed.flags.has('--headed'), theme, density });
+  writeState({ url: targetUrl, frontend, device, viewport, theme, density });
+  // 移动端没有紧凑模式（上游 isCompactModeAvailable 只允许桌面系）：属性写下去
+  // 也不生效，明确说一声，别让 agent 以为已经切到紧凑态。
+  if (frontend === 'mobile' && density === 'compact') note('移动端没有紧凑模式：--density compact 不会生效');
   note(`已打开 ${frontend}：${targetUrl}`);
 }
 
 export async function reload(argv: string[], url: string | null): Promise<void> {
   // 参数先校验、再要求会话（与 do / read 一致）。
   const parsed = parseArgs(argv, {
-    valueFlags: ['--frontend', '--viewport'],
+    valueFlags: ['--frontend', '--viewport', '--theme', '--density'],
     allowUnknown: false,
   });
   const requested = lastValue(parsed, '--frontend');
   const requestedFrontend = requested === undefined ? null : parseFrontend(requested);
   const viewportRaw = lastValue(parsed, '--viewport');
   const viewport = viewportRaw === undefined ? null : parseViewport(viewportRaw);
+  const requestedTheme = parseDimension('--theme', lastValue(parsed, '--theme'));
+  const requestedDensity = parseDimension('--density', lastValue(parsed, '--density'));
 
   requireSession();
 
@@ -225,20 +281,122 @@ export async function reload(argv: string[], url: string | null): Promise<void> 
   const frontend = requestedFrontend ?? actual ?? state?.frontend ?? 'desktop';
   const targetUrl = resolveFrontendUrl(frontend, url);
 
+  // 没显式给维度就重放会话里记的：导航会把它们重置回配置值，
+  // 不重放的话「设暗色 → 改 CSS → reload → 测量」会静默测成亮色。
+  const theme = requestedTheme ?? state?.theme ?? null;
+  const density = requestedDensity ?? state?.density ?? null;
+
   // 设备跟着前端走：切到 mobile 就模拟真机，切回 desktop 就清掉设备模拟。
-  // `launch` 会就地用 CDP 切换（不重开浏览器），再 goto。
-  await launch(frontend, targetUrl, { device: state?.device ?? null, viewport });
-  writeState({ url: targetUrl, frontend, device: state?.device ?? null, viewport });
+  // `launch` 会就地用 CDP 切换（不重开浏览器），再 goto，最后应用维度。
+  await launch(frontend, targetUrl, { device: state?.device ?? null, viewport, theme, density });
+  writeState({ url: targetUrl, frontend, device: state?.device ?? null, viewport, theme, density });
+  if (frontend === 'mobile' && density === 'compact') note('移动端没有紧凑模式：--density compact 不会生效');
   note(`已重新加载：${targetUrl}`);
 }
 
-/** status 的输出是数据，留在 stdout。文本模式沿用 playwright-cli 自己的排版。 */
-export function status(json: boolean): void {
-  if (!sessionExists()) {
-    output(json ? { browsers: [] } : '未启动', json);
+/** status 的测量状态形状（`--json` 时原样输出）。 */
+export interface MeasurementStatus {
+  open: boolean;
+  frontend?: Frontend;
+  theme?: ThemeMode | null;
+  density?: Density | null;
+  url?: string;
+  viewport?: Viewport | null;
+}
+
+/** `ENV_FN` 里本命令用到的字段（页面侧返回 unknown，这里逐项收窄）。 */
+interface EnvReading {
+  frontend?: unknown;
+  themeMode?: unknown;
+  uiDensity?: unknown;
+  url?: unknown;
+  viewport?: unknown;
+}
+
+/**
+ * 测量状态：状态文件 + 页面上实际的维度。
+ *
+ * 只读状态文件是不够的：文件可能被删、写失败，或者会话是别的工具开的；
+ * 而 agent 真正要知道的是「现在这一页是什么状态」。所以页面在会话里时，
+ * 以页面上实际的 `data-theme-mode` / `data-ui-density` / URL / 视口为准，
+ * 读不到才退回状态文件。
+ *
+ * `density` 报告 `default` 而不是 null：页面上没有这个属性**就是**普通态，
+ * 这与「没指定」是两回事（后者只在参数语义里存在）。
+ */
+function measurementStatus(): MeasurementStatus {
+  if (!sessionExists()) return { open: false };
+  const state = readState();
+  let env: EnvReading | null = null;
+  try {
+    env = evalScript(evalExpr(ENV_FN)) as EnvReading | null;
+  } catch {
+    // 页面可能还没就绪：退回状态文件里的记录。
+  }
+  const frontendValue = typeof env?.frontend === 'string' ? env.frontend : null;
+  const frontend = frontendValue ? FRONTEND_ATTR[frontendValue] ?? state?.frontend ?? null : state?.frontend ?? null;
+  const themeMode = typeof env?.themeMode === 'string' ? env.themeMode : null;
+  const theme: ThemeMode | null = isThemeMode(themeMode) ? themeMode : state?.theme ?? null;
+  // 属性不存在 = 普通态；只有读不到页面（env 为 null）才退回状态文件。
+  const densityRaw = env === null ? undefined : typeof env.uiDensity === 'string' ? env.uiDensity : null;
+  const density: Density | null =
+    densityRaw === undefined ? state?.density ?? null : densityRaw === 'compact' ? 'compact' : 'default';
+  const url = typeof env?.url === 'string' ? env.url : state?.url;
+  // 视口优先用页面实际尺寸：会话可能被 resize 过，状态文件里没有这次改动。
+  const viewport = pageViewport(env?.viewport) ?? state?.viewport ?? null;
+  return {
+    open: true,
+    ...(frontend === null ? {} : { frontend }),
+    theme,
+    density,
+    ...(url === undefined ? {} : { url }),
+    viewport,
+  };
+}
+
+/** 从页面读数里取 CSS 视口尺寸；形状不对返回 null。 */
+function pageViewport(raw: unknown): Viewport | null {
+  if (!isRecord(raw)) return null;
+  const { width, height } = raw;
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+  return { width: Math.round(width as number), height: Math.round(height as number) };
+}
+
+/**
+ * status：默认给测量状态，`--raw` 给 playwright 自己的会话列表。
+ *
+ * 旧实现的 `--json` 只吐 playwright 的内部字段（318 B），不含
+ * frontend/theme/density/viewport，agent 还得再跑一次 `read env`。
+ */
+export function status(json: boolean, raw: boolean): void {
+  if (raw) {
+    if (!sessionExists()) {
+      output(json ? { browsers: [] } : '未启动', json);
+      return;
+    }
+    output(json ? { browsers: listSessions() } : runCli(['list']), json);
     return;
   }
-  output(json ? { browsers: listSessions() } : runCli(['list']), json);
+
+  const state = measurementStatus();
+  if (!json) {
+    output(state.open ? renderStatus(state) : '未启动', false);
+    return;
+  }
+  output(state, true);
+}
+
+/** 文本模式下给人读的一行一项。 */
+function renderStatus(state: MeasurementStatus): string {
+  const lines = [
+    'open: true',
+    `frontend: ${state.frontend ?? '(无)'}`,
+    `theme: ${state.theme ?? '(无)'}`,
+    `density: ${state.density ?? '(无)'}`,
+    `url: ${state.url ?? '(无)'}`,
+    `viewport: ${state.viewport ? `${String(state.viewport.width)}x${String(state.viewport.height)}` : '(无)'}`,
+  ];
+  return lines.join('\n');
 }
 
 export function close(): void {

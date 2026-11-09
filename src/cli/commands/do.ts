@@ -8,13 +8,14 @@
  * 否则 agent 会先去 open，再撞上同一个错。
  */
 import { lastValue, parseArgs, positiveInt } from '../args.ts';
+import { applyCell, parseAt } from '../cell.ts';
 import { UserError } from '../errors.ts';
 import { output } from '../format.ts';
 import { evalScript, runCliAction } from '../playwright.ts';
 import { ATTR_FN, dockFn, evalExpr, MENU_FN, RESET_FN, styleOfFn } from '../script/recipe.ts';
 import { ACTION_SETTLE_MS, POINTER_PARK_MS } from '../timing.ts';
 import { isRecord, sleep } from '../util.ts';
-import { requireSession } from './session.ts';
+import { currentFrontend, requireSession } from './session.ts';
 
 /** 直接转发给 playwright-core cli 的原生动作。 */
 const NATIVE_ACTIONS = new Set([
@@ -63,7 +64,7 @@ function requireArg(value: string | undefined, action: string, hint: string): st
   return value;
 }
 
-export async function doAction(argv: string[], json: boolean): Promise<void> {
+export async function doAction(argv: string[], json: boolean, at: string | null = null, url: string | null = null): Promise<void> {
   const [action, ...rest] = argv;
   if (!action) throw new UserError('do 需要动作名');
 
@@ -120,6 +121,19 @@ export async function doAction(argv: string[], json: boolean): Promise<void> {
 
   // ---- 到这里参数已合法，才要求会话 ----
   requireSession();
+
+  // `--at` 只允许单格：多格里执行真实点击会把「点了几次、点到谁」变成
+  // 一个需要推理的问题，而动作本来就是要看「点完之后这一格长什么样」。
+  // 要比较多格的交互态，用 `audit` 的 steps（每格重建场景），不要指望一次 do。
+  if (at !== null) {
+    const spec = parseAt(at);
+    if (spec.cells.length !== 1) {
+      throw new UserError(
+        `do 的 --at 必须精确到一格（frontend/theme/density）：${at} 展开出 ${String(spec.cells.length)} 格`
+      );
+    }
+    await applyCell(spec.cells[0]!, url, currentFrontend());
+  }
 
   /** 动作前读一次、动作后读一次。 */
   const withDiff = async (selector: string, run: () => void): Promise<void> => {

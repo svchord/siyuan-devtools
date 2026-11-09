@@ -17,6 +17,7 @@ import {
   MENU_FN,
   RESET_FN,
   styleOfFn,
+  THEME_FN,
   TOKENS_FN,
 } from '../src/cli/script/recipe.ts';
 
@@ -125,8 +126,7 @@ function withDom<T>(setup: { root?: FakeElement; all?: FakeElement[]; bySelector
 }
 
 /** 只支持测试用到的几种选择器。 */
-function matches(el: FakeElement, selector: string): boolean {
-  const attr = /^\[([\w-]+)(?:="([^"]*)")?\]$/.exec(selector);
+function matches(el: FakeElement, selector: string): boolean {  const attr = /^\[([\w-]+)(?:="([^"]*)")?\]$/.exec(selector);
   if (attr) {
     const value = el.attributes[attr[1]!];
     return attr[2] === undefined ? value !== undefined : value === attr[2];
@@ -147,6 +147,130 @@ function assertParses(source: string): void {
   expect(() => new Function(`return (${source});`)).not.toThrow();
 }
 
+/**
+ * THEME_FN 的假 DOM。
+ *
+ * 它只走「换 `<link>`、等 load、摘旧表」这条路径，所以假节点只需要 href、
+ * cloneNode 与事件监听；`insertBefore` 记录顺序，`load` 用微任务模拟
+ * 样式表加载完成——同步派发反而测不出真实时序。
+ */
+interface FakeLink {
+  id: string;
+  href: string;
+  parent: FakeParent | null;
+  /** THEME_FN 用 `old.parentNode` 判断能否插入/摘除。 */
+  parentNode: FakeParent | null;
+  getAttribute(name: string): string | null;
+  setAttribute(name: string, value: string): void;
+  cloneNode(deep: boolean): FakeLink;
+  addEventListener(type: string, fn: () => void): void;
+  removeEventListener(type: string, fn: () => void): void;
+  remove(): void;
+}
+
+interface FakeParent {
+  children: FakeLink[];
+  insertBefore(node: FakeLink, before: FakeLink | null): void;
+}
+
+async function withThemeDom<T>(
+  setup: {
+    links?: ReadonlyArray<{ id: string; href: string }>;
+    appearance?: { themeLight?: string; themeDark?: string };
+    /** 主题名 → 该表生效后的 body 背景色；缺省表示换表不改变背景。 */
+    backgrounds?: Record<string, string>;
+    /** false 表示页面里没有 window.siyuan（早期初始化）。 */
+    siyuan?: boolean;
+  },
+  run: (ctx: { root: FakeElement; links: () => FakeLink[]; background: () => string }) => Promise<T>
+): Promise<T> {
+  const root = element('html');
+  const body = element('body');
+  const parent: FakeParent = {
+    children: [],
+    insertBefore(node, before) {
+      const index = before === null ? -1 : parent.children.indexOf(before);
+      if (index === -1) parent.children.push(node);
+      else parent.children.splice(index, 0, node);
+      node.parent = parent;
+      node.parentNode = parent;
+    },
+  };
+  let background = 'rgb(255, 255, 255)';
+
+  const make = (id: string, href: string): FakeLink => {
+    const link: FakeLink = {
+      id,
+      href,
+      parent: null,
+      parentNode: null,
+      getAttribute(name) {
+        return name === 'href' ? link.href : name === 'id' ? link.id : null;
+      },
+      setAttribute(name, value) {
+        if (name === 'href') link.href = value;
+        if (name === 'id') link.id = value;
+      },
+      cloneNode() {
+        // 真实 cloneNode(false) 复制属性，但不复制监听器与父子关系。
+        return make(link.id, link.href);
+      },
+      addEventListener(type, fn) {
+        if (type !== 'load') return;
+        queueMicrotask(() => {
+          const theme = /\/appearance\/themes\/([^/]+)\//.exec(link.href)?.[1];
+          if (theme !== undefined && setup.backgrounds?.[theme] !== undefined) {
+            background = setup.backgrounds[theme]!;
+          }
+          fn();
+        });
+      },
+      removeEventListener() {},
+      remove() {
+        const index = parent.children.indexOf(link);
+        if (index !== -1) parent.children.splice(index, 1);
+        link.parent = null;
+        link.parentNode = null;
+      },
+    };
+    return link;
+  };
+
+  for (const { id, href } of setup.links ?? []) {
+    const link = make(id, href);
+    link.parent = parent;
+    link.parentNode = parent;
+    parent.children.push(link);
+  }
+
+  const globals = globalThis as unknown as Record<string, unknown>;
+  const saved = {
+    document: globals.document,
+    window: globals.window,
+    getComputedStyle: globals.getComputedStyle,
+    requestAnimationFrame: globals.requestAnimationFrame,
+  };
+  globals.document = {
+    documentElement: root,
+    body,
+    getElementById: (id: string) => parent.children.find((link) => link.id === id) ?? null,
+  };
+  globals.window =
+    setup.siyuan === false ? {} : { siyuan: { config: { appearance: setup.appearance ?? {} } } };
+  globals.getComputedStyle = (el: FakeElement) => ({
+    backgroundColor: el === body ? background : 'rgba(0, 0, 0, 0)',
+  });
+  globals.requestAnimationFrame = (fn: (time: number) => void) => queueMicrotask(() => fn(0));
+  try {
+    return await run({ root, links: () => parent.children, background: () => background });
+  } finally {
+    globals.document = saved.document;
+    globals.window = saved.window;
+    globals.getComputedStyle = saved.getComputedStyle;
+    globals.requestAnimationFrame = saved.requestAnimationFrame;
+  }
+}
+
 describe('片段可解析', () => {
   it.each([
     ['env', ENV_FN],
@@ -158,6 +282,7 @@ describe('片段可解析', () => {
     ['attr', ATTR_FN],
     ['reset', RESET_FN],
     ['contrast', contrastFn('--a', '--b')],
+    ['theme', THEME_FN],
   ])('%s', (_name, source) => assertParses(source));
 });
 
@@ -370,5 +495,134 @@ describe('ENV_FN 的行为', () => {
       delete globals.devicePixelRatio;
       delete globals.location;
     }
+  });
+});
+
+/**
+ * 只改 `data-theme-mode` 对内置 daylight/midnight 无效：两者的配色是两张
+ * 独立的 CSS 文件。实测设 dark 后 `--b3-theme-background` 仍是 `#fff`，换成
+ * midnight 的 `<link>` 才变 `#1e1e1e`。这里锁住「属性 + 换表」两件事。
+ */
+describe('THEME_FN 的行为', () => {
+  const DAYLIGHT = 'http://127.0.0.1:8899/appearance/themes/daylight/theme.css?v=3.8.9';
+  const MIDNIGHT = 'http://127.0.0.1:8899/appearance/themes/midnight/theme.css?v=3.8.9';
+
+  it('设置 data-theme-mode 属性', async () => {
+    await withThemeDom({ links: [{ id: 'themeDefaultStyle', href: DAYLIGHT }] }, async ({ root }) => {
+      await load(THEME_FN)('dark');
+      expect(root.attributes['data-theme-mode']).toBe('dark');
+    });
+  });
+
+  it('daylight → midnight：href 被替换且 ?v= 查询串保留', async () => {
+    await withThemeDom({ links: [{ id: 'themeDefaultStyle', href: DAYLIGHT }] }, async ({ links }) => {
+      const result = (await load(THEME_FN)('dark')) as Record<string, unknown>;
+      expect(result.ok).toBe(true);
+      expect(result.defaultTheme).toBe('midnight');
+      // 旧表被摘掉，只剩新表。
+      expect(links()).toHaveLength(1);
+      expect(links()[0]!.getAttribute('href')).toBe(MIDNIGHT);
+    });
+  });
+
+  it('light 时切回 daylight', async () => {
+    await withThemeDom({ links: [{ id: 'themeDefaultStyle', href: MIDNIGHT }] }, async ({ links }) => {
+      const result = (await load(THEME_FN)('light')) as Record<string, unknown>;
+      expect(result.defaultTheme).toBe('daylight');
+      expect(links()[0]!.getAttribute('href')).toBe(DAYLIGHT);
+    });
+  });
+
+  /**
+   * 回归：`changed` 必须反映**实际配色**，不能因为换了表就恒为 true。
+   * 调用方靠它判断「这次切换到底有没有改变渲染」。
+   */
+  it('背景色不变时 changed 为 false', async () => {
+    await withThemeDom({ links: [{ id: 'themeDefaultStyle', href: DAYLIGHT }] }, async () => {
+      const result = (await load(THEME_FN)('dark')) as Record<string, unknown>;
+      expect(result.changed).toBe(false);
+    });
+  });
+
+  it('背景色真的变了时 changed 为 true', async () => {
+    await withThemeDom(
+      {
+        links: [{ id: 'themeDefaultStyle', href: DAYLIGHT }],
+        backgrounds: { daylight: 'rgb(255, 255, 255)', midnight: 'rgb(30, 30, 30)' },
+      },
+      async () => {
+        const result = (await load(THEME_FN)('dark')) as Record<string, unknown>;
+        expect(result.changed).toBe(true);
+      }
+    );
+  });
+
+  it('没有 window.siyuan 时只设属性，不抛错', async () => {
+    await withThemeDom({ links: [], siyuan: false }, async ({ root }) => {
+      const result = (await load(THEME_FN)('dark')) as Record<string, unknown>;
+      expect(root.attributes['data-theme-mode']).toBe('dark');
+      expect(result).toMatchObject({ ok: true, changed: false, customTheme: null });
+    });
+  });
+
+  /**
+   * 自定义主题：`appearance.themeDark` 与内置主题不同名时，`#themeStyle`
+   * 也要换成那张表；同名或没有自定义主题时，`#themeStyle` 应当被摘掉，
+   * 否则会和默认表叠加。
+   */
+  it('自定义暗色主题写到 #themeStyle', async () => {
+    await withThemeDom(
+      {
+        links: [
+          { id: 'themeDefaultStyle', href: DAYLIGHT },
+          { id: 'themeStyle', href: 'http://127.0.0.1:8899/appearance/themes/Old/theme.css?v=1' },
+        ],
+        appearance: { themeDark: 'Rem Craft Dev' },
+      },
+      async ({ links }) => {
+        await load(THEME_FN)('dark');
+        const byId = Object.fromEntries(links().map((link) => [link.id, link.getAttribute('href')]));
+        expect(byId['themeDefaultStyle']).toBe(MIDNIGHT);
+        // 只换主题名那一段，原有查询串（缓存版本号）保留。
+        expect(byId['themeStyle']).toBe('http://127.0.0.1:8899/appearance/themes/Rem Craft Dev/theme.css?v=1');
+      }
+    );
+  });
+
+  it('没有自定义主题时摘掉 #themeStyle，避免两套表叠加', async () => {
+    await withThemeDom(
+      {
+        links: [
+          { id: 'themeDefaultStyle', href: DAYLIGHT },
+          { id: 'themeStyle', href: 'http://127.0.0.1:8899/appearance/themes/Rem Craft Dev/theme.css?v=1' },
+        ],
+        appearance: {},
+      },
+      async ({ links }) => {
+        await load(THEME_FN)('dark');
+        expect(links().map((link) => link.id)).toEqual(['themeDefaultStyle']);
+      }
+    );
+  });
+
+  it('自定义主题与内置主题同名时不重复换表', async () => {
+    await withThemeDom(
+      {
+        links: [{ id: 'themeDefaultStyle', href: DAYLIGHT }],
+        appearance: { themeDark: 'midnight' },
+      },
+      async ({ links }) => {
+        await load(THEME_FN)('dark');
+        expect(links()).toHaveLength(1);
+        expect(links()[0]!.getAttribute('href')).toBe(MIDNIGHT);
+      }
+    );
+  });
+
+  /** 内置主题没有 #themeDefaultStyle 时不能抛错（早期初始化/别的版本）。 */
+  it('没有 #themeDefaultStyle 时安全返回', async () => {
+    await withThemeDom({ links: [] }, async () => {
+      await expect(load(THEME_FN)('dark')).resolves.toMatchObject({ ok: true });
+    });
   });
 });

@@ -10,13 +10,13 @@ description: 测量思源主题/插件的真实渲染（样式、令牌、对比
 ## 会话
 
 ```bash
-siyuan-devtools open --frontend desktop     # 首次：起浏览器并打开页面
-siyuan-devtools status                      # 查看会话（不创建）
-siyuan-devtools close                       # 关闭
+siyuan-devtools open --frontend desktop     # 首次：起浏览器并打开页面，只调一次
+siyuan-devtools status                      # 测量状态：open/frontend/theme/density/url/viewport
+siyuan-devtools close
 ```
 
-`open` 只调一次。**不要再 open 第二次**——它会杀掉旧 Chrome 起一个新的。
-（`reload` / `audit` / `shot` 切换前端时会在原会话里就地切设备模拟，不会杀掉你的浏览器。）
+**不要再 open 第二次**——它会杀掉旧 Chrome。加载新产物用 `reload`；`reload` / `audit` / `shot`
+切前端时在原会话里就地切设备模拟，不重开浏览器。`status --raw` 才是 playwright 的会话列表。
 
 ## 改完源码后
 
@@ -28,7 +28,8 @@ siyuan-devtools close                       # 关闭
 5. 测量
 ```
 
-`reload` 会整页刷新，之前的 hover、打开的菜单、滚动位置全部清空。
+`reload` 整页刷新，hover、打开的菜单、滚动位置全部清空；但它会**重放**会话里记的
+`--theme` / `--density`（导航会把它们重置回思源配置）。
 
 ## 读数
 
@@ -40,61 +41,83 @@ siyuan-devtools read element .b3-menu__item --box --limit 3
 siyuan-devtools read contrast --rc-text-primary --rc-bg-page
 ```
 
-`read env` 返回页面状态，用它判断主题是否挂载（看 `themeStyle` 是否为 null）。
+`read element` 默认只给 `found/count/visible/styles`（`--box` 加 `boxes`）；`--meta` 才带
+`tag`/`className`，只要数值时别加。
+
+## 测量格（最重要）
+
+三个维度写成一个格：`frontend/theme/density`，例如 `desktop/dark/compact`。
+任何读数都能加 `--at`，**一条命令在多个模式上取值**：
+
+```bash
+siyuan-devtools read tokens --brand-8 --at all                    # 全部 6 格
+siyuan-devtools read element .b3-menu__item --props color --at desktop/dark
+siyuan-devtools read contrast --rc-text-primary --rc-bg-page --at desktop
+siyuan-devtools do hover .b3-menu__item --diff color --at desktop/dark/default
+```
+
+- `--at` 取值：`all` 或 `frontend[/theme[/density]]`，逗号分隔多段。
+- 省略的段按该段全部取值展开：`desktop` = 4 格，`desktop/dark` = 2 格。
+- 合法域由工具定义：desktop 4 格 + mobile 2 格 = 6 格；`mobile/compact` 不存在。
+- 多格输出是表：`cells`（行标签）+ `columns` + `rows`，所有格相同的列折叠进 `same`。
+- `--at` 是纯命令，跑完会还原到进入前的格；`do --at` 例外（它就是要改变页面状态）。
 
 ## 动作
 
 ```bash
 siyuan-devtools do hover .b3-menu__item
-siyuan-devtools do click .b3-menu
 siyuan-devtools do click .b3-menu__item --button right
 siyuan-devtools do fill .b3-text-field "hello"
-siyuan-devtools do press Enter
-siyuan-devtools do menu theme
-siyuan-devtools do dock outline
-siyuan-devtools do attr data-theme-mode=dark
-siyuan-devtools do reset
+siyuan-devtools do menu theme        # 也有 dock / attr / press / reset
 ```
 
-加 `--diff color,background-color` 会在动作前后各读一次，省一轮往返；支持 `click` / `hover` / `dblclick` / `fill` / `drag` / `select`。动作后会等待过渡落定。
+加 `--diff color,background-color` 会在动作前后各读一次，省一轮往返；支持
+`click`/`hover`/`dblclick`/`fill`/`drag`/`select`。
 
-交互态跨命令保留：`do hover` 之后直接 `read element` 就能读到 hover 后的样式。
+选择器必须**唯一命中**：playwright 是 strict 模式，`.dock__item` 这类命中多个会直接报错，
+用 `[data-type=x]` / `:nth-child` 收窄。交互态跨命令保留：`do hover` 后直接 `read element`
+读到的就是 hover 后的样式。
 
-## 批量
+## 明暗与密度
 
-计划文件一次跑完，比逐条命令省往返：
+```bash
+siyuan-devtools reload --theme dark --density compact   # 切换并记住
+siyuan-devtools reload                                  # 重放记住的值
+```
+
+`--theme light|dark` 会同时改 `data-theme-mode` 与主题 `<link>` 的 href——内置
+daylight/midnight 是两张独立 CSS，只改属性对内置主题无效。
+`--density default|compact`：上游只有 `compact`，普通态是**没有**该属性，所以用 `default`。
+移动端没有紧凑模式。
+
+## 批量与截图
+
+计划文件一次跑完，比逐条命令省往返；带 `axes` 时每个格各跑一遍：
 
 ```json
 {
-  "frontend": "desktop",
+  "axes": { "frontend": ["desktop", "mobile"], "theme": ["light", "dark"], "density": ["default", "compact"] },
   "steps": [
-    { "do": "menu:theme" },
-    { "read": "element", "selector": ".b3-menu__item", "props": ["color", "background-color"] },
-    { "do": "hover:.b3-menu__item", "diff": { "selector": ".b3-menu__item", "props": ["color"] } },
+    { "read": "tokens", "names": ["--brand-8", "--rc-text-primary"] },
     { "read": "contrast", "foreground": "--rc-text-primary", "background": "--rc-bg-page" }
-  ]
+  ],
+  "shots": { "out": "shots" }
 }
 ```
 
 ```bash
 siyuan-devtools audit plan.json
+siyuan-devtools shot --at all --out shots
+siyuan-devtools shot --frontend both --theme light,dark --density default,compact --out shots
 ```
 
-## 截图
-
-```bash
-siyuan-devtools shot --frontend both --theme dark --out shots
-siyuan-devtools shot --density compact --out shots        # 明暗保持页面当前值
-siyuan-devtools shot --theme dark --density compact       # 两个维度可组合
-```
-
-`--frontend mobile` 默认模拟 iPhone 13（dpr 3、移动端 UA、touch），CSS 视口仍是 390x844；桌面端默认 1600x1000 与 dpr 1。
-`shot` 会为每个前端就地切换设备模拟（不重开浏览器），结束时把会话还原到截图前的状态。
+`audit` 的输出是按格对齐的表（列 = step 展开后的字段），截图只给路径与字节数。
+`shot` 的 `--at` 与三组维度 flag 是两种写法，不能混用。`mobile × compact` 会被跳过并在
+stderr 说明。`shot` 结束时把会话与页面维度还原到截图前。
 
 ## 约定
 
-- 加 `--json` 拿结构化输出（默认是人读文本）。
+- `--json` 紧凑输出（不缩进）；`--pretty` 才缩进（隐含 `--json`）。
 - 端口默认 6806，可用 `SIYUAN_PORT` 或 `--url` 覆盖；`open` 时的 URL 会被记住。
 - `--` 之后的参数按字面量处理，例如 `do fill '#inp' -- --json`。
-- 退出码 0 = 成功，2 = 失败（错误信息在 stderr）。
-- 不确定参数时用 `siyuan-devtools --help`。
+- 退出码 0 = 成功，2 = 失败（错误信息在 stderr）。参数不确定时用 `--help`。

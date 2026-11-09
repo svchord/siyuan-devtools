@@ -12,11 +12,90 @@
  * 必须跑 recipe.test.ts —— 它会把每个片段放进 `new Function` 解析一遍。
  */
 
-/** 页面是否已经完成思源前端启动。 */
+/**
+ * 页面是否已经完成思源前端启动。
+ *
+ * 不能用 `window.siyuan.config` 判断：那个对象在页面启动 ~78 ms 就有了，
+ * 而真正可截图的界面要等 `isReady`（~1.5 s，mobile 更慢）。用弱条件会让
+ * `shot` 截到只有 logo 的闪屏，`reload` 之后紧接着的读数也会读到空页面，
+ * 且两者都以退出码 0 结束——调用方完全看不出「测早了」。
+ */
 export const READY_FN = `() => Boolean(
-  window.siyuan?.config &&
+  window.siyuan?.isReady === true &&
   document.documentElement.getAttribute('data-frontend')
 )`;
+
+/**
+ * 切换明暗主题：改 `data-theme-mode`，**并换主题样式表**。
+ *
+ * 只改属性对内置主题无效：daylight 与 midnight 的配色是两张独立的 CSS 文件，
+ * `data-theme-mode` 只是给第三方主题用的钩子。实测在内置 daylight 上把属性
+ * 设成 dark，`--b3-theme-background` 仍是 `#fff`，截出来是「浅色界面 + dark
+ * color-scheme」的假暗色图；换成 midnight 的 `<link>` 才真的变成 `#1e1e1e`。
+ *
+ * 换表必须 clone 一份新的再删旧的，不能原地改 href：原地改会让页面在旧表
+ * 卸载、新表加载之间闪一帧无样式内容，截图正好拍到就毁了。等新表 `load`
+ * 再摘旧表，页面始终有一套完整样式。
+ *
+ * 形状是 `async (mode) => {...}`：`page.evaluate(THEME_FN, mode)` 与
+ * `cli --json eval`（经 `evalExpr` 包成自执行）两种调用都能用。
+ */
+export const THEME_FN = `async (mode) => {
+  const root = document.documentElement;
+  const before = getComputedStyle(document.body).backgroundColor;
+  root.setAttribute('data-theme-mode', mode);
+  const defaultTheme = mode === 'dark' ? 'midnight' : 'daylight';
+  const siyuan = window.siyuan;
+  if (!siyuan) {
+    // 没有运行时配置就查不到自定义主题名。属性写下了，但配色不会变，
+    // 如实报 changed: false，免得调用方以为换主题成功了。
+    return { ok: true, mode, changed: false, defaultTheme, customTheme: null };
+  }
+  const appearance = siyuan.config?.appearance ?? {};
+  const customTheme = mode === 'dark' ? appearance.themeDark : appearance.themeLight;
+  const themePath = new RegExp('/appearance/themes/[^/]+/');
+  // 换掉一个 <link> 的 href；只替换主题名那一段，?v= 查询串原样保留
+  // （它是思源的缓存版本号，丢掉会拿到过期样式）。
+  const swap = (id, theme) => new Promise((resolve) => {
+    const old = document.getElementById(id);
+    if (!old) { resolve(false); return; }
+    const href = old.getAttribute('href') ?? '';
+    const next = href.replace(themePath, '/appearance/themes/' + theme + '/');
+    if (next === href) { resolve(false); return; }
+    const link = old.cloneNode(false);
+    link.setAttribute('href', next);
+    if (!old.parentNode) { resolve(false); return; }
+    old.parentNode.insertBefore(link, old);
+    let settled = false;
+    // 先声明 timer 再定义 finish：同步派发 load 的引擎（以及测试里的假 DOM）
+    // 会在 setTimeout 赋值之前就调进 finish，那时访问 timer 会抛 TDZ 错误。
+    let timer = null;
+    const onLoad = () => finish(true);
+    const onError = () => finish(false);
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) clearTimeout(timer);
+      link.removeEventListener('load', onLoad);
+      link.removeEventListener('error', onError);
+      // 失败时留着旧表，页面至少还是原来那套配色，不会变成无样式。
+      if (ok) old.remove(); else link.remove();
+      resolve(ok);
+    };
+    // 1500ms 兜底：有的引擎对克隆出来的 link 不派发 load，干等会让截图
+    // 永远不返回。超时按生效处理——新表已经插进去了，此时再留旧表就是两套
+    // 主题叠加，比「可能没生效」更糟。
+    timer = setTimeout(() => finish(true), 1500);
+    link.addEventListener('load', onLoad, { once: true });
+    link.addEventListener('error', onError, { once: true });
+  });
+  await swap('themeDefaultStyle', defaultTheme);
+  if (customTheme && customTheme !== defaultTheme) await swap('themeStyle', customTheme);
+  else document.getElementById('themeStyle')?.remove();
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const after = getComputedStyle(document.body).backgroundColor;
+  return { ok: true, mode, changed: before !== after, defaultTheme, customTheme: customTheme ?? null };
+}`;
 
 /** 记录会话开始时的 `<html>` 属性快照，供 reset 恢复。 */
 export const SNAPSHOT_ROOT_FN = `() => {

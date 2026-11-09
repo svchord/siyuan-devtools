@@ -1,6 +1,6 @@
-/** 输出排版：数据走 stdout、状态走 stderr、--json 只有 JSON。 */
-import { describe, expect, it, vi } from 'vitest';
-import { note, output } from '../src/cli/format.ts';
+/** 输出排版：数据走 stdout、状态走 stderr、--json 只有 JSON、--pretty 才缩进。 */
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { note, output, setPretty } from '../src/cli/format.ts';
 
 /** 收集 console.log 的参数。 */
 function capture(): { lines: string[]; restore: () => void } {
@@ -11,12 +11,30 @@ function capture(): { lines: string[]; restore: () => void } {
   return { lines, restore: () => spy.mockRestore() };
 }
 
+// 缩进是模块级开关，用例之间必须复位，否则结果取决于执行顺序。
+afterEach(() => setPretty(false));
+
 describe('output', () => {
-  it('--json 输出格式化 JSON，可直接被 jq 消费', () => {
+  it('--json 默认紧凑输出：缩进换行对 agent 是纯开销', () => {
     const { lines, restore } = capture();
+    output({ a: 1, b: [2] }, true);
+    restore();
+    expect(lines.join('\n')).toBe(JSON.stringify({ a: 1, b: [2] }));
+  });
+
+  it('--pretty 时输出缩进 JSON，仍可被 jq 消费', () => {
+    const { lines, restore } = capture();
+    setPretty(true);
     output({ a: 1 }, true);
     restore();
     expect(lines.join('\n')).toBe(JSON.stringify({ a: 1 }, null, 2));
+  });
+
+  it('undefined 在 JSON 模式下折成 null，不会打出字面量 undefined', () => {
+    const { lines, restore } = capture();
+    output(undefined, true);
+    restore();
+    expect(lines).toEqual(['null']);
   });
 
   it('字符串按原样输出（调用方已排好版）', () => {
