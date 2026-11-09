@@ -5,12 +5,41 @@
  *
  * **每个嵌套对象都 `.strict()`**：只在根上加时，步骤里把 `props` 拼成 `propss`
  * 会被 zod 静默剥掉，读数退回默认值、报告却显示成功——这正是要防的静默失败。
+ *
+ * `.strict()` 只防「拼错」，不防「放错步骤」：`{ read: 'env', props: [...] }`
+ * 的字段名合法、但那个步骤根本不读 props，编译时会被忽略。所以下面还要逐项
+ * 校验「字段只能出现在对应类型的步骤里」。
+ *
+ * 编译期不再重复这里已经保证的检查：`plan.ts` 只处理「形状已合法」的计划。
  */
 import { z } from 'zod';
+import { parseProps } from '../css.ts';
 import { parseViewport } from '../viewport.ts';
 
 const stringArray = (label: string) =>
   z.array(z.string({ error: `${label}[i] 必须是字符串` }), { error: `${label} 必须是数组` });
+
+/** 计划里支持的 `do` 动作。plan.ts 用它判断动作合法性，不另写一份。 */
+export const PLAN_ACTIONS = ['hover', 'click', 'menu'] as const;
+
+/** 各 read 类型允许的字段。 */
+const READ_FIELDS: Record<string, readonly string[]> = {
+  env: [],
+  tokens: ['names'],
+  element: ['selector', 'props', 'box', 'limit'],
+  contrast: ['foreground', 'background'],
+};
+
+/** 各字段只在对应 read 类型下有效；用于「字段放错步骤」的报错。 */
+const FIELD_OWNER: Record<string, string> = {
+  selector: 'read element',
+  props: 'read element',
+  box: 'read element',
+  limit: 'read element',
+  names: 'read tokens',
+  foreground: 'read contrast',
+  background: 'read contrast',
+};
 
 /** 一步：读数或动作。 */
 const stepShape = z
@@ -20,7 +49,7 @@ const stepShape = z
     diff: z
       .object({
         selector: z.string({ error: 'diff.selector 必须是字符串' }).min(1, { error: 'diff.selector 不能为空' }),
-        props: stringArray('diff.props'),
+        props: stringArray('diff.props').min(1, { error: 'diff.props 不能为空' }),
       })
       .strict()
       .optional(),
@@ -49,15 +78,64 @@ const stepShape = z
       }
     }
     if (step.do !== undefined) {
-      if (!/^(?:hover|click|menu):.+/s.test(step.do)) {
-        ctx.addIssue({ code: 'custom', path: ['do'], message: 'do 必须是 hover:<selector> / click:<selector> / menu:<id>' });
+      if (!/^(?:hover|click|menu):[\s\S]+$/.test(step.do)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['do'],
+          message: `do 必须是 ${PLAN_ACTIONS.join(' / ')} 之一，形如 hover:<selector>`,
+        });
       }
     }
     if (step.diff && step.do === undefined) {
       ctx.addIssue({ code: 'custom', path: ['diff'], message: 'diff 只能用于 do 步骤' });
     }
-    if ((step.box !== undefined || step.limit !== undefined) && step.read !== 'element') {
-      ctx.addIssue({ code: 'custom', message: 'box / limit 只能用于 read element' });
+    // 与 CLI 对齐：--limit 只影响 --box 的输出，单独给等于静默无效。
+    if (step.limit !== undefined && step.box !== true) {
+      ctx.addIssue({ code: 'custom', path: ['limit'], message: 'limit 只能与 box: true 一起使用' });
+    }
+
+    // 「字段放错步骤」：字段名合法、但当前步骤根本不读它。
+    if (step.read !== undefined) {
+      const allowed = READ_FIELDS[step.read] ?? [];
+      for (const [field, owner] of Object.entries(FIELD_OWNER)) {
+        if (allowed.includes(field)) continue;
+        if ((step as Record<string, unknown>)[field] === undefined) continue;
+        ctx.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `${field} 只能用于 ${owner}，不能出现在 read ${step.read} 里（否则会被静默忽略）`,
+        });
+      }
+    } else {
+      // do 步骤：只有 diff 是合法的附加字段。
+      // 既没有 read 也没有 do 时交给下面的 refine 报「每一步必须有 read 或 do」，
+      // 不要在这里抢先报一个让人困惑的字段错误。
+      if (step.do === undefined) return;
+      for (const [field, owner] of Object.entries(FIELD_OWNER)) {
+        if ((step as Record<string, unknown>)[field] === undefined) continue;
+        ctx.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `${field} 只能用于 ${owner}，不能出现在 do 步骤里（否则会被静默忽略）`,
+        });
+      }
+    }
+
+    // props 内容也在这里校验：放到编译期（runPlan）会变成「浏览器都开了才报错」。
+    for (const [path, value] of [
+      [['props'], step.props?.join(',')],
+      [['diff', 'props'], step.diff?.props.join(',')],
+    ] as const) {
+      if (value === undefined) continue;
+      try {
+        parseProps(value, []);
+      } catch (cause) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [...path],
+          message: cause instanceof Error ? cause.message : String(cause),
+        });
+      }
     }
   })
   .refine((step) => step.read !== undefined || step.do !== undefined, {
