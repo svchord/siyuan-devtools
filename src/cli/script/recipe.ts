@@ -222,10 +222,3 @@ export function evalExpr(fn: string, arg?: unknown): string {
   return arg === undefined ? `(${fn})()` : `(${fn})(${JSON.stringify(arg)})`;
 }
 
-/** @deprecated 临时别名：do.ts 迁移到 dockFn 后删除。 */
-export const DOCK_FN = `type => {
-  const el = document.querySelector('.dock__item[data-type="' + type + '"]');
-  if (!el) return { ok: false, reason: '找不到停靠项' };
-  el.click();
-  return { ok: true };
-}`;

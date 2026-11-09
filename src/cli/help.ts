@@ -1,4 +1,4 @@
-/** 帮助文本。 */
+/** 帮助文本。README 与 SKILL 的命令表以这里为准。 */
 export const HELP = `siyuan-devtools — 思源主题/插件渲染测量
 
 会话
@@ -36,5 +36,7 @@ export const HELP = `siyuan-devtools — 思源主题/插件渲染测量
   siyuan-devtools install --skills [--global]
   siyuan-devtools --help
 
-全局选项：--json（结构化输出）、--url <前端 URL>（默认按 SIYUAN_PORT 或 6806 拼）
+全局选项：--json（结构化输出）、--url <前端 URL>（默认沿用 open 时的 URL，
+否则按 SIYUAN_PORT 或 6806 拼）。-- 之后的参数一律按字面量处理，
+例如 siyuan-devtools do fill '#inp' -- --json
 `;

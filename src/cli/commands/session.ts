@@ -131,7 +131,7 @@ export function status(json: boolean): void {
     output(listSessions(), true);
     return;
   }
-  console.log(runCli(['list']).out);
+  console.log(runCli(['list']));
 }
 
 export function close(): void {
