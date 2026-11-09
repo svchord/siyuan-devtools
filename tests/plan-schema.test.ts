@@ -97,6 +97,49 @@ describe('parsePlan', () => {
 
   it('do 必须是受支持的动作格式', () => {
     expect(firstError({ ...VALID, steps: [{ do: 'teleport:.x' }] })).toContain('hover:<selector>');
+    expect(firstError({ ...VALID, steps: [{ do: 'click' }] })).toContain('hover:<selector>');
+  });
+
+  it('diff.props 不能为空', () => {
+    expect(firstError({ ...VALID, steps: [{ do: 'hover:.x', diff: { selector: '.x', props: [] } }] })).toContain('diff.props');
+  });
+
+  it('limit 必须与 box 一起用（与 CLI 语义一致）', () => {
+    expect(firstError({ ...VALID, steps: [{ read: 'element', selector: '.x', limit: 3 }] })).toContain('box');
+    expect(parsePlan({ ...VALID, steps: [{ read: 'element', selector: '.x', box: true, limit: 3 }] }).ok).toBe(true);
+  });
+
+  /**
+   * `.strict()` 只防「拼错」，不防「放错步骤」：字段名合法、但该步骤根本不读它，
+   * 编译时会被静默忽略。这些用例锁住逐字段的归属校验。
+   */
+  it('字段放错步骤时报错，而不是静默忽略', () => {
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['selector', { read: 'env', selector: '.x' }],
+      ['props', { read: 'env', props: ['color'] }],
+      ['names', { read: 'element', selector: '.x', names: ['--a'] }],
+      ['foreground', { read: 'env', foreground: '--a' }],
+      ['selector', { do: 'hover:.x', selector: '.y' }],
+      ['names', { do: 'hover:.x', names: ['--a'] }],
+    ];
+    for (const [field, step] of cases) {
+      const message = firstError({ ...VALID, steps: [step] });
+      expect(message, JSON.stringify(step)).toContain(field);
+      expect(message, JSON.stringify(step)).toContain('静默忽略');
+    }
+  });
+
+  it('props 内容在 schema 阶段就校验（不是开了浏览器才报错）', () => {
+    expect(firstError({ ...VALID, steps: [{ read: 'element', selector: '.x', props: ['col or'] }] })).toContain('不合法');
+    expect(firstError({ ...VALID, steps: [{ read: 'element', selector: '.x', props: [] }] })).toContain('不能为空');
+    // camelCase 是合法的，会被规范化
+    expect(parsePlan({ ...VALID, steps: [{ read: 'element', selector: '.x', props: ['backgroundColor'] }] }).ok).toBe(true);
+  });
+
+  it('厂商前缀属性是合法的', () => {
+    expect(
+      parsePlan({ ...VALID, steps: [{ read: 'element', selector: '.x', props: ['-webkit-text-fill-color'] }] }).ok
+    ).toBe(true);
   });
 
   it('diff 只能用于 do 步骤', () => {
