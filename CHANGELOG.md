@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/svchord/siyuan-devtools/compare/v0.2.0...v0.3.0) (2026-11-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* 用场景模型重写批量测量，页面按前端复用
+
+### Bug Fixes
+
+* cliPath 读 package.json 的 bin 字段，不写死 cli.js ([2dcd0f3](https://github.com/svchord/siyuan-devtools/commit/2dcd0f33f122dad377d2de785b28228a60279be2))
+
+
+### Code Refactoring
+
+* 用场景模型重写批量测量，页面按前端复用 ([837bd51](https://github.com/svchord/siyuan-devtools/commit/837bd51e3598af5575efe10bd69ca59d28ce18c9))
+
 ## [0.2.0](https://github.com/svchord/siyuan-devtools/compare/v0.1.0...v0.2.0) (2026-11-09)
 
 
