@@ -1,19 +1,18 @@
 /**
- * 设备模拟：把「模拟某台真机」编译成 CDP 调用。
+ * 设备模拟：设备名 → 参数，以及切设备的 CDP 脚本。
  *
- * 为什么不用 `open --device`：那只能在开会话时指定，改不了已有会话。
- * 而 `shot` 要在同一个会话里轮流截 desktop 与 mobile，`reload` / `audit`
- * 也可能在会话中途切前端——重开浏览器虽然能换设备，但代价是：杀掉用户的
- * 页面状态、丢掉登录态、多花一次冷启动。
+ * `open --device` 只能在开会话时指定；`reload --frontend mobile` 需要在同一个
+ * 会话里切过去，所以走 CDP 的 Emulation 域就地切换，不重开浏览器。
  *
- * CDP 的 Emulation 域可以就地切换，实测与 `open --device` 逐项一致
- * （innerWidth/dpr/screen/UA/pointer/hover/min-resolution/orientation）。
- * 唯一限制：`navigator.maxTouchPoints` 与 `'ontouchstart' in window` 在页面
- * 加载时固化，切换后需要一次 reload 才生效——所以调用方切完要重新导航。
+ * 实测与 `open --device` 逐项一致（innerWidth/dpr/screen/UA/pointer/hover/
+ * min-resolution/orientation）。唯一限制：`navigator.maxTouchPoints` 与
+ * `'ontouchstart' in window` 在页面加载时固化，切换后需要一次 reload 才生效。
+ *
+ * 测量页不用这里：它们按前端新建独立 context，`viewport / deviceScaleFactor /
+ * isMobile / hasTouch / userAgent` 在创建时一次给全，截图尺寸天然正确。
  */
 import { devices } from 'playwright-core';
 import { UserError } from './errors.ts';
-import { THEME_FN } from './script/recipe.ts';
 import type { Frontend } from './url.ts';
 
 /** 移动端默认模拟的设备。 */
@@ -119,129 +118,3 @@ export function deviceScript(
   return { emulated: true };
 }`;
 }
-
-/**
- * 用 CDP 截图，返回 base64 PNG。
- *
- * 为什么不用 `cli screenshot --hires`：`--hires` 取的是**浏览器上下文**的
- * deviceScaleFactor，它在会话创建时就固定了；CDP 的 `setDeviceMetricsOverride`
- * 改不动它。实测桌面会话切到 dpr=3 后，`--hires` 仍输出 1600x1000。
- *
- * 为什么必须把「设设备 + 导航 + 截图」放在**同一次 run-code** 里：
- * `Page.captureScreenshot` 只在**设置覆盖的那个 CDP 会话**内看到设备参数。
- * 换一次调用重新 `newCDPSession`，虽然页面里 `devicePixelRatio` 仍是 3
- * （evaluate 读得到），但截图会退回 390x664 的 CSS 像素。
- *
- * 等待分三层，缺一层就会截到中间态：
- *  1. `isReady`——等界面真正可用（只等 `config` 会截到启动闪屏）；
- *  2. 维度改动后的 `settleMs`——等主题样式表换完触发重排；
- *  3. 两帧 rAF——等浏览器把这一帧真的画出来。
- * 第 3 层**无条件**执行：没有维度改动时它依然负责「等首帧绘制」，
- * 这也是 `shot`（无参数）曾经截到闪屏的原因之一。
- *
- * `mode` / `density` 为空表示不改该维度；`mode` 走 `THEME_FN` 是因为换主题
- * 不只是改属性，还要换 `<link>` 样式表（见 recipe.ts 里 THEME_FN 的说明）。
- *
- * `extra` 是插在「维度落定」与「截图」之间的页面动作（`audit` 用它把整份
- * 计划跑在同一个 run-code 里）。它产出的是**语句**，可以往 `steps` 变量里
- * 推结果；截图之后这些结果会随 `data` 一起返回，省掉一次子进程。
- */
-export function captureScript(options: {
-  profile: DeviceProfile | null;
-  viewport: { width: number; height: number };
-  url: string;
-  mode: 'light' | 'dark' | null;
-  density: 'default' | 'compact' | null;
-  settleMs: number;
-  extra?: { statements: string; resultsVar: string } | null;
-  /**
-   * 是否真的截图。`false` 时只做「切设备 + 导航 + 设维度 + 等就绪」，
-   * 供 `--at` 跨前端切换用：那条路径只要一个可用页面，不要 PNG，
-   * 而 `launch` 要 4–5 次子进程，这里合成一次。
-   */
-  screenshot?: boolean;
-}): string {
-  const { profile, viewport, url, mode, density, settleMs, extra = null, screenshot = true } = options;
-  const metrics = profile
-    ? {
-        width: viewport.width,
-        height: viewport.height,
-        deviceScaleFactor: profile.deviceScaleFactor,
-        mobile: profile.mobile,
-        screenWidth: profile.screenWidth,
-        screenHeight: profile.screenHeight,
-        screenOrientation: { type: 'portraitPrimary', angle: 0 },
-      }
-    : { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: false };
-  const touch = profile?.hasTouch ?? false;
-  const userAgent = profile?.userAgent ?? '';
-
-  // 维度步骤只做赋值，不声明变量：声明统一放在脚本头部，避免某个维度
-  // 缺席时 `applied` 里的字段变成未声明标识符。
-  //
-  // 密度必须经 `page.evaluate` 改：run-code 的脚本体跑在 Node 里，
-  // 这里没有 `document`。
-  const themeStep =
-    mode === null
-      ? ''
-      : `  const theme = await page.evaluate(${THEME_FN}, ${JSON.stringify(mode)});
-  appliedMode = theme?.mode ?? ${JSON.stringify(mode)};
-  themeChanged = theme?.changed === true;
-`;
-  const densityStep =
-    density === null
-      ? ''
-      : density === 'compact'
-        ? `  densityValue = await page.evaluate(() => {
-    document.documentElement.setAttribute('data-ui-density', 'compact');
-    return 'compact';
-  });
-`
-        : `  densityValue = await page.evaluate(() => {
-    document.documentElement.removeAttribute('data-ui-density');
-    return 'default';
-  });
-`;
-  const hasDimensions = mode !== null || density !== null;
-
-  return `async (page) => {
-  const session = await page.context().newCDPSession(page);
-  await session.send('Emulation.setDeviceMetricsOverride', ${JSON.stringify(metrics)});
-  await session.send('Emulation.setTouchEmulationEnabled', { enabled: ${touch}${touch ? ', maxTouchPoints: 5' : ''} });
-  await session.send('Emulation.setUserAgentOverride', { userAgent: ${JSON.stringify(userAgent)} });
-  await page.goto(${JSON.stringify(url)});
-  // 等思源前端真正就绪（与 READY_FN 同条件），最多 15s。
-  // 不能等启动早期的 config 对象：它在 ~78ms 就为真，会截到启动闪屏。
-  await page.waitForFunction(
-    () => Boolean(window.siyuan?.isReady === true && document.documentElement.getAttribute('data-frontend')),
-    undefined,
-    { timeout: 15000 }
-  );
-  let appliedMode = null;
-  let themeChanged = false;
-  let densityValue = null;
-${themeStep}${densityStep}${
-    hasDimensions
-      ? `  // 主题换表/密度改属性都会触发重排，等它落定再截。
-  await page.waitForTimeout(${settleMs});
-`
-      : ''
-  }${extra === null ? '' : `${extra.statements}`}  // 两帧 rAF 后读一次布局：rAF 只保证「这一帧要画」，读布局才会强制浏览器
-  // 把挂起的样式与排版算完，否则 CDP 可能仍拿到上一帧的位图。
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
-    document.documentElement.getBoundingClientRect();
-    resolve(true);
-  }))));
-${
-  screenshot
-    ? `  const shot = await session.send('Page.captureScreenshot', { format: 'png' });
-  return { data: shot.data, applied: { mode: appliedMode, changed: themeChanged, density: densityValue }${
-      extra === null ? '' : `, steps: ${extra.resultsVar}`
-    } };`
-    : `  return { applied: { mode: appliedMode, changed: themeChanged, density: densityValue }${
-        extra === null ? '' : `, steps: ${extra.resultsVar}`
-      } };`
-}
-}`;
-}
-

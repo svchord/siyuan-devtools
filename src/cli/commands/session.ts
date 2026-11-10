@@ -29,14 +29,13 @@
  */
 import { lastValue, parseArgs } from '../args.ts';
 import { deviceNameFor, deviceProfile, deviceScript } from '../device.ts';
-import { DIMENSIONS, parseDimension, isThemeMode } from '../dimensions.ts';
-import type { Density, ThemeMode } from '../dimensions.ts';
+import { DIMENSIONS, isThemeMode, parseDimension } from '../scene.ts';
+import type { Density, ThemeMode } from '../scene.ts';
 import { UserError } from '../errors.ts';
 import { note, output } from '../format.ts';
 import { ensureWorkspace, evalScript, listSessions, runCli, runCode, sessionExists } from '../playwright.ts';
 import { ATTR_FN, ENV_FN, evalExpr, READY_FN, SNAPSHOT_ROOT_FN, THEME_FN } from '../script/recipe.ts';
 import { clearState, readState, writeState } from '../session-state.ts';
-import type { SessionState } from '../session-state.ts';
 import { READY_TIMEOUT_MS } from '../timing.ts';
 import { parseFrontend, resolveFrontendUrl } from '../url.ts';
 import type { Frontend } from '../url.ts';
@@ -217,24 +216,35 @@ export async function launch(frontend: Frontend, url: string, options: LaunchOpt
 
   await waitForReady();
   // 维度在就绪之后应用：页面还没挂主题时设属性，会被随后的初始化覆盖。
-  applyDimensions(options.theme ?? null, options.density ?? null);
+  // 移动端没有紧凑模式：写下去也不生效，直接不写，免得 status 报告一个假状态。
+  const density = frontend === 'mobile' && options.density === 'compact' ? null : (options.density ?? null);
+  applyDimensions(options.theme ?? null, density);
   captureRootSnapshot();
 }
 
 /**
- * 恢复一个已保存的会话（shot 结束时用）。
+ * 重载所有测量页（懒创建的、不属于 live 页的那些）。
  *
- * 与 `launch` 的区别：状态里可能记录了显式 viewport、设备与维度，要一起还原。
+ * build 后 kernel 会广播 reloadUI，但一次性 `vite build` 或用户手动 reload
+ * 时不一定广播到所有页面，所以显式重载一次，保证下一轮 batch 读到新 CSS。
  */
-export async function restoreSession(state: SessionState): Promise<void> {
-  await launch(state.frontend, state.url, {
-    device: state.device,
-    viewport: state.viewport,
-    // 旧状态文件里没有这两个字段：缺省即「不指定」，别把它当成 null 传下去
-    // （exactOptionalPropertyTypes 下 undefined 与 null 是两种类型）。
-    theme: state.theme ?? null,
-    density: state.density ?? null,
-  });
+function reloadMeasurePages(): void {
+  try {
+    runCode(`async (page) => {
+  const browser = page.context().browser();
+  const pages = [];
+  for (const ctx of browser.contexts()) {
+    for (const p of ctx.pages()) if (p.url().includes('#syd-measure=')) pages.push(p);
+  }
+  await Promise.all(pages.map(async (p) => {
+    await p.reload();
+    await p.waitForFunction(() => Boolean(window.siyuan?.isReady === true), undefined, { timeout: 20000 });
+  }));
+  return pages.length;
+}`);
+  } catch {
+    // 测量页重载失败不影响 live 会话；下一次使用时会重新等待就绪。
+  }
 }
 
 export async function open(argv: string[], url: string | null): Promise<void> {
@@ -247,14 +257,14 @@ export async function open(argv: string[], url: string | null): Promise<void> {
   const device = lastValue(parsed, '--device') ?? null;
   const viewportRaw = lastValue(parsed, '--viewport');
   const viewport = viewportRaw === undefined ? null : parseViewport(viewportRaw);
-  // 与 shot 共用同一套取值校验：两处各写一份必然漂移（旧实现就多出一个
+  // 与 batch 共用同一套取值校验：两处各写一份必然漂移（旧实现就多出一个
   // 上游不存在的 comfortable）。
   const theme = parseDimension('--theme', lastValue(parsed, '--theme'));
   const density = parseDimension('--density', lastValue(parsed, '--density'));
   const targetUrl = resolveFrontendUrl(frontend, url);
 
   await launch(frontend, targetUrl, { device, viewport, headed: parsed.flags.has('--headed'), theme, density });
-  writeState({ url: targetUrl, frontend, device, viewport, theme, density });
+  writeState({ url: targetUrl, frontend, device, viewport });
   // 移动端没有紧凑模式（上游 isCompactModeAvailable 只允许桌面系）：属性写下去
   // 也不生效，明确说一声，别让 agent 以为已经切到紧凑态。
   if (frontend === 'mobile' && density === 'compact') note('移动端没有紧凑模式：--density compact 不会生效');
@@ -281,17 +291,30 @@ export async function reload(argv: string[], url: string | null): Promise<void> 
   const frontend = requestedFrontend ?? actual ?? state?.frontend ?? 'desktop';
   const targetUrl = resolveFrontendUrl(frontend, url);
 
-  // 没显式给维度就重放会话里记的：导航会把它们重置回配置值，
-  // 不重放的话「设暗色 → 改 CSS → reload → 测量」会静默测成亮色。
-  const theme = requestedTheme ?? state?.theme ?? null;
-  const density = requestedDensity ?? state?.density ?? null;
+  // 导航会把明暗/密度重置回思源配置。**从当前页面读一次再重放**，
+  // 不依赖状态文件——页面才是唯一真相。「设暗色 → 改 CSS → reload → 测量」
+  // 不重放就会静默测成亮色。
+  const before = readLiveScene();
+  const theme = requestedTheme ?? before.theme;
+  const density = requestedDensity ?? before.density;
 
-  // 设备跟着前端走：切到 mobile 就模拟真机，切回 desktop 就清掉设备模拟。
-  // `launch` 会就地用 CDP 切换（不重开浏览器），再 goto，最后应用维度。
   await launch(frontend, targetUrl, { device: state?.device ?? null, viewport, theme, density });
-  writeState({ url: targetUrl, frontend, device: state?.device ?? null, viewport, theme, density });
+  writeState({ url: targetUrl, frontend, device: state?.device ?? null, viewport });
+  reloadMeasurePages();
   if (frontend === 'mobile' && density === 'compact') note('移动端没有紧凑模式：--density compact 不会生效');
   note(`已重新加载：${targetUrl}`);
+}
+
+/** 从 live 页读当前明暗/密度；读不到就返回 null（不猜）。 */
+function readLiveScene(): { theme: ThemeMode | null; density: Density | null } {
+  try {
+    const env = evalScript(evalExpr(ENV_FN)) as { themeMode?: unknown; uiDensity?: unknown } | null;
+    const theme = isThemeMode(env?.themeMode) ? env.themeMode : null;
+    const density = env?.uiDensity === 'compact' ? 'compact' : env?.uiDensity === null ? 'default' : null;
+    return { theme, density };
+  } catch {
+    return { theme: null, density: null };
+  }
 }
 
 /** status 的测量状态形状（`--json` 时原样输出）。 */
@@ -336,11 +359,11 @@ function measurementStatus(): MeasurementStatus {
   const frontendValue = typeof env?.frontend === 'string' ? env.frontend : null;
   const frontend = frontendValue ? FRONTEND_ATTR[frontendValue] ?? state?.frontend ?? null : state?.frontend ?? null;
   const themeMode = typeof env?.themeMode === 'string' ? env.themeMode : null;
-  const theme: ThemeMode | null = isThemeMode(themeMode) ? themeMode : state?.theme ?? null;
-  // 属性不存在 = 普通态；只有读不到页面（env 为 null）才退回状态文件。
+  const theme: ThemeMode | null = isThemeMode(themeMode) ? themeMode : null;
+  // 属性不存在 = 普通态；只有读不到页面（env 为 null）才把密度留空。
   const densityRaw = env === null ? undefined : typeof env.uiDensity === 'string' ? env.uiDensity : null;
   const density: Density | null =
-    densityRaw === undefined ? state?.density ?? null : densityRaw === 'compact' ? 'compact' : 'default';
+    densityRaw === undefined ? null : densityRaw === 'compact' ? 'compact' : 'default';
   const url = typeof env?.url === 'string' ? env.url : state?.url;
   // 视口优先用页面实际尺寸：会话可能被 resize 过，状态文件里没有这次改动。
   const viewport = pageViewport(env?.viewport) ?? state?.viewport ?? null;

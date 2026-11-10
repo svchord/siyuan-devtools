@@ -15,8 +15,7 @@ siyuan-devtools status                      # 测量状态：open/frontend/theme
 siyuan-devtools close
 ```
 
-**不要再 open 第二次**——它会杀掉旧 Chrome。加载新产物用 `reload`；`reload` / `audit` / `shot`
-切前端时在原会话里就地切设备模拟，不重开浏览器。`status --raw` 才是 playwright 的会话列表。
+`open` 只创建这一个前端页面。需要别的页面时工具会自己懒创建，不用手动 open 第二个。
 
 ## 改完源码后
 
@@ -28,8 +27,7 @@ siyuan-devtools close
 5. 测量
 ```
 
-`reload` 整页刷新，hover、打开的菜单、滚动位置全部清空；但它会**重放**会话里记的
-`--theme` / `--density`（导航会把它们重置回思源配置）。
+`reload` 整页刷新，hover、打开的菜单、滚动位置全部清空；但它会从当前页面读一次明暗/密度并重放。
 
 ## 读数
 
@@ -44,25 +42,24 @@ siyuan-devtools read contrast --rc-text-primary --rc-bg-page
 `read element` 默认只给 `found/count/visible/styles`（`--box` 加 `boxes`）；`--meta` 才带
 `tag`/`className`，只要数值时别加。
 
-## 测量格（最重要）
+## 场景（`--at`，最重要）
 
-三个维度写成一个格：`frontend/theme/density`，例如 `desktop/dark/compact`。
-任何读数都能加 `--at`，**一条命令在多个模式上取值**：
+一个场景是 `frontend/theme/density`，可以附加任意 `<html>` 属性：
 
 ```bash
 siyuan-devtools read tokens --brand-8 --at all                    # 全部 6 格
-siyuan-devtools read element .b3-menu__item --props color --at desktop/dark
-siyuan-devtools read contrast --rc-text-primary --rc-bg-page --at desktop
-siyuan-devtools do hover .b3-menu__item --diff color --at desktop/dark/default
+siyuan-devtools read element .b3-menu__item --props color --at desktop/dark # 2 格
+siyuan-devtools read contrast --rc-text-primary --rc-bg-page --at desktop   # 4 格
+siyuan-devtools read tokens --brand-8 --at desktop/dark/default/data-rc-style=fluent
 ```
 
-- `--at` 取值：`all` 或 `frontend[/theme[/density]]`，逗号分隔多段。
+- `--at` 取值：`all` 或 `frontend[/theme[/density]][/键=值...]`，逗号分隔多段。
 - 省略的段按该段全部取值展开：`desktop` = 4 格，`desktop/dark` = 2 格。
 - 合法域由工具定义：desktop 4 格 + mobile 2 格 = 6 格；`mobile/compact` 不存在。
-- 多格输出是表：`cells`（行标签）+ `columns` + `rows`，所有格相同的列折叠进 `same`。
-- `--at` 是纯命令，跑完会还原到进入前的格；`do --at` 例外（它就是要改变页面状态）。
+- 多格输出是表：`cells` + `columns` + `rows`，所有格相同的列折叠进 `same`。
+- **带 `--at` 时不会弄乱当前页**：当前前端就在你这一页上改属性再设回去（hover/菜单保留）；其它前端懒创建测量页并复用。
 
-## 动作
+## 动作（只作用于当前页）
 
 ```bash
 siyuan-devtools do hover .b3-menu__item
@@ -81,8 +78,8 @@ siyuan-devtools do menu theme        # 也有 dock / attr / press / reset
 ## 明暗与密度
 
 ```bash
-siyuan-devtools reload --theme dark --density compact   # 切换并记住
-siyuan-devtools reload                                  # 重放记住的值
+siyuan-devtools reload --theme dark --density compact   # 切换 live 页并重放
+siyuan-devtools reload                                  # 重放当前页面上的值
 ```
 
 `--theme light|dark` 会同时改 `data-theme-mode` 与主题 `<link>` 的 href——内置
@@ -92,11 +89,11 @@ daylight/midnight 是两张独立 CSS，只改属性对内置主题无效。
 
 ## 批量与截图
 
-计划文件一次跑完，比逐条命令省往返；带 `axes` 时每个格各跑一遍：
+计划文件一次跑完，带 `at` / `axes` 时每个场景各跑一遍：
 
 ```json
 {
-  "axes": { "frontend": ["desktop", "mobile"], "theme": ["light", "dark"], "density": ["default", "compact"] },
+  "at": "all",
   "steps": [
     { "read": "tokens", "names": ["--brand-8", "--rc-text-primary"] },
     { "read": "contrast", "foreground": "--rc-text-primary", "background": "--rc-bg-page" }
@@ -108,12 +105,11 @@ daylight/midnight 是两张独立 CSS，只改属性对内置主题无效。
 ```bash
 siyuan-devtools audit plan.json
 siyuan-devtools shot --at all --out shots
-siyuan-devtools shot --frontend both --theme light,dark --density default,compact --out shots
+siyuan-devtools shot --out shots          # 只截当前页，不导航
 ```
 
-`audit` 的输出是按格对齐的表（列 = step 展开后的字段），截图只给路径与字节数。
-`shot` 的 `--at` 与三组维度 flag 是两种写法，不能混用。`mobile × compact` 会被跳过并在
-stderr 说明。`shot` 结束时把会话与页面维度还原到截图前。
+`audit` 用**独立测量页**：计划里的 `do` 会改动页面，每格开始前 reload，所以不碰你的交互页。
+`shot` 不带 `--at` 就是截当前页当前状态。矩阵里的失败格进 `errors`，全失败才 exit 2。
 
 ## 约定
 

@@ -148,23 +148,21 @@ const stepShape = z
 /** 计划整体。 */
 export const planShape = z
   .object({
-    // 有 axes 时 frontend 由轴展开，不再单独要求。
-    frontend: z.enum(['desktop', 'mobile'], { error: 'frontend 必须是 desktop 或 mobile' }).optional(),
-    /**
-     * 要遍历的维度。缺省 = 该轴取全部合法值；`frontend` 与 `axes` 二选一。
-     *
-     * 与 `--at` 共用同一套合法域（见 cell.ts），所以 mobile × compact 这类
-     * 不存在的组合会被跳过而不是产出一个假格子。
-     */
+    /** 场景选择，与 CLI 的 `--at` 同一套语法（`all` / `desktop/dark` …）。 */
+    at: z.string({ error: 'at 必须是字符串，如 "all" 或 "desktop/dark"' }).min(1, { error: 'at 不能为空' }).optional(),
+    /** 结构化轴，与 `--at` 二选一；附加属性写在 attrs 里。 */
     axes: z
       .object({
         frontend: z.array(z.enum(['desktop', 'mobile']), { error: 'axes.frontend 必须是 desktop / mobile 的数组' }).optional(),
         theme: z.array(z.enum(['light', 'dark']), { error: 'axes.theme 必须是 light / dark 的数组' }).optional(),
         density: z.array(z.enum(['default', 'compact']), { error: 'axes.density 必须是 default / compact 的数组' }).optional(),
+        attrs: z
+          .record(z.string(), z.array(z.string({ error: 'axes.attrs 的每个值必须是字符串数组' })))
+          .optional(),
       })
       .strict()
       .optional(),
-    /** 每格截一张图；`mode: changed` 时只保留与上一轮不同的（需 --baseline）。 */
+    /** 每格截一张图。 */
     shots: z
       .object({
         out: z.string({ error: 'shots.out 必须是字符串（目录）' }).min(1, { error: 'shots.out 不能为空' }).optional(),
@@ -188,13 +186,13 @@ export const planShape = z
     steps: z.array(stepShape, { error: 'steps 必须是数组' }).min(1, { error: 'steps 不能为空' }),
   })
   .strict()
-  .refine((plan) => plan.frontend !== undefined || plan.axes !== undefined, {
-    error: '计划需要 frontend 或 axes 之一',
-    path: ['frontend'],
+  .refine((plan) => plan.at !== undefined || plan.axes !== undefined, {
+    error: '计划需要 at 或 axes 之一',
+    path: ['at'],
   })
-  .refine((plan) => !(plan.frontend !== undefined && plan.axes?.frontend !== undefined), {
-    error: 'frontend 与 axes.frontend 不能同时给（前者是单前端，后者是遍历）',
-    path: ['frontend'],
+  .refine((plan) => !(plan.at !== undefined && plan.axes !== undefined), {
+    error: 'at 与 axes 不能同时给（两种写法）',
+    path: ['at'],
   });
 
 export type Plan = z.infer<typeof planShape>;

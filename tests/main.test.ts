@@ -125,14 +125,10 @@ describe('--raw 的适用范围', () => {
 });
 
 describe('--at 的适用范围', () => {
-  it('给会话命令时报错（它改的是页面状态，不是会话）', async () => {
-    await expect(main(['--at', 'all', 'reload'])).rejects.toThrow('--at 不能用于 reload');
-    await expect(main(['--at', 'all', 'open'])).rejects.toThrow('--at 不能用于 open');
-  });
-
-  it('read env 拒绝 --at：它读的就是当前状态', async () => {
-    // 参数校验在 requireSession 之前，不碰浏览器。
-    await expect(main(['--at', 'all', 'read', 'env'])).rejects.toThrow('read env 不接受 --at');
+  it('给会话命令时报错（它只用于纯测量）', async () => {
+    await expect(main(['--at', 'all', 'reload'])).rejects.toThrow('--at 只用于 read / shot');
+    await expect(main(['--at', 'all', 'open'])).rejects.toThrow('--at 只用于 read / shot');
+    await expect(main(['--at', 'all', 'do', 'hover', '.x'])).rejects.toThrow('--at 只用于 read / shot');
   });
 
   it('字面量颜色的 contrast 拒绝 --at：与页面状态无关', async () => {

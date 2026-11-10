@@ -20,19 +20,18 @@ npx siyuan-devtools install --skills    # 给 agent 装一页 skill
   siyuan-devtools status [--raw]   默认给测量状态（open/frontend/theme/density/url/viewport），--raw 才是 playwright 会话列表
   siyuan-devtools close
 
-读数
+读数（不带 --at：读当前页；带 --at：多场景矩阵）
   siyuan-devtools read env
   siyuan-devtools read tokens <name...>
   siyuan-devtools read element <selector> [--props a,b] [--box [--limit N]] [--meta]
   siyuan-devtools read contrast <fg> <bg>    # fg/bg 可以是令牌名，也可以是 #fff / rgb(...) / hsl(...)
 
-动作（click/hover/dblclick/fill/drag/select 支持 --diff a,b）
+动作（只作用于当前页）
   siyuan-devtools do click <selector> [--button left|right|middle] [--count 1|2]
   siyuan-devtools do hover <selector>
   siyuan-devtools do dblclick <selector>
   siyuan-devtools do fill <selector> <text>
-  siyuan-devtools do press <key>
-  siyuan-devtools do keydown <key> / do keyup <key>
+  siyuan-devtools do press <key> / do keydown <key> / do keyup <key>
   siyuan-devtools do mousemove <x> <y>
   siyuan-devtools do drag <from> <to>
   siyuan-devtools do select <selector> <value>
@@ -42,53 +41,52 @@ npx siyuan-devtools install --skills    # 给 agent 装一页 skill
   siyuan-devtools do reset
 
 批量 / 产物
-  siyuan-devtools audit <plan.json> [--json]     # 计划可带 axes，一次跑完所有模式
-  siyuan-devtools shot [--frontend both|desktop|mobile] [--theme light,dark] [--density default,compact] [--out shots]
-  siyuan-devtools shot --at all --out shots       # 同上，用格语法表达
+  siyuan-devtools shot [--at <场景>] [--out shots]   # 不带 --at 截当前页；带 --at 批量截图
+  siyuan-devtools audit <plan.json>                   # 计划里写 at / axes
 ```
 
-`--theme` / `--density` 都接受逗号多值，展开成「前端 × 明暗 × 密度」的格子，一条命令出全部截图；
-文件名带生效维度（`desktop-light-compact.png`）。移动端没有紧凑模式（上游 `isCompactModeAvailable`
-只允许桌面系），`mobile × compact` 会被跳过并在 stderr 说明原因。
+## 场景（`--at`）
 
-## 测量格（`--at`）
-
-三个维度（frontend / theme / density）可以写成**一个格** `desktop/dark/default`，
-任何读数与动作都能用 `--at` 指定，一条命令在多个格上取值：
+一个场景是 `frontend/theme/density` 三元组，可以附加任意 `<html>` 属性：
 
 ```bash
 siyuan-devtools read tokens --brand-8 --at all
 siyuan-devtools read element .b3-menu__item --props color --at desktop/dark
-siyuan-devtools read contrast --rc-text-primary --rc-bg-page --at desktop/dark
-siyuan-devtools do hover .b3-menu__item --diff color --at desktop/dark/default
+siyuan-devtools read contrast --rc-text-primary --rc-bg-page --at desktop
+siyuan-devtools read tokens --brand-8 --at desktop/dark/default/data-rc-style=fluent
 ```
 
-`--at` 取值：`all` 或 `frontend[/theme[/density]]`，逗号分隔多段。省略的段按该段全部取值展开
-（`desktop` = 4 格，`desktop/dark` = 2 格）。合法域由工具定义：desktop 4 格 + mobile 2 格 = 6 格，
-`mobile/compact` 不存在。
+- 取值：`all` 或 `frontend[/theme[/density]][/键=值...]`，逗号分隔多段。
+- 省略的段按该段全部取值展开（`desktop` = 4 格，`desktop/dark` = 2 格）。
+- 合法域由工具定义：desktop 4 格 + mobile 2 格 = 6 格；`mobile/compact` 不存在。
+- 多场景输出是表：`cells`（行标签）+ `columns` + `rows`，所有格相同的列折叠进 `same`，失败的格进 `errors`。
 
-多格输出是一张表：列只写一次、行是纯值数组，所有格相同的列折叠进 `same`。`--at` 是纯命令，
-执行完会把页面还原到进入前的格；`do --at` 例外（它就是要改变页面状态）。
+### 页面模型（为什么 `--at` 不会弄乱你的页面）
 
-计划文件也可以声明轴，效果与 `--at all` 相同：
+- `open` 只创建你指定的那一个前端页面。
+- 带 `--at` 时：**当前前端直接用你正在交互的那一页**，主题/密度只是改 `<html>` 属性（约 25ms），跑完把属性设回去——菜单、hover、滚动位置都不丢。
+- 其它前端（比如 `--at all` 里的 mobile）第一次用到时才创建测量页，之后复用；它放在独立 context 里，不会出现在 `tab-list`。
+- `read --at` / `shot --at` 永远不导航你的页面。
+
+计划文件用同一套语法：
 
 ```json
 {
-  "axes": { "frontend": ["desktop", "mobile"], "theme": ["light", "dark"], "density": ["default", "compact"] },
-  "steps": [ { "read": "tokens", "names": ["--brand-8"] } ],
+  "at": "all",
+  "steps": [
+    { "do": "menu:theme" },
+    { "read": "tokens", "names": ["--brand-8", "--rc-text-primary"] },
+    { "read": "contrast", "foreground": "--rc-text-primary", "background": "--rc-bg-page" }
+  ],
   "shots": { "out": "shots" }
 }
 ```
 
-`--frontend mobile` 默认模拟 iPhone 13（dpr 3、移动端 UA、touch），CSS 视口仍是 390x844；`desktop` 默认 1600x1000 与 dpr 1。
-`--device` 只在 `open` 时用原生设备模拟；已有会话上切换前端时，`reload` / `audit` / `shot`
-会改用 CDP 就地切换设备参数（dpr / UA / touch / pointer 全部一致），不重开浏览器。
+```bash
+siyuan-devtools audit plan.json
+```
 
-`--theme` 不只是改 `data-theme-mode` 属性：内置 daylight/midnight 的配色是两张独立 CSS，
-所以切换时会一并换掉 `#themeDefaultStyle` / `#themeStyle` 的 `href`。只改属性对内置主题无效。
-
-`reload` 会重放会话里记录的 `--theme` / `--density`：导航会把它们重置回思源配置，
-不重放的话「设暗色 → 改 CSS → reload → 测量」会静默测成亮色。
+`audit` 用**独立的测量页**（`measure-only`）：计划里的 `do` 会改动页面，每格开始前 reload，所以不会碰你的交互页。纯读数的计划也走同一条路径，保证结果可复现。`axes` 是 `at` 的结构化写法，额外轴写在 `axes.attrs` 里。
 
 ## 工作流
 
@@ -101,21 +99,20 @@ siyuan-devtools do hover .b3-menu__item --diff color --at desktop/dark/default
 6. read / audit
 ```
 
-`reload` 会整页刷新，之前的 hover、打开的菜单、滚动位置都会清空。
+`reload` 会整页刷新，之前的 hover、打开的菜单、滚动位置都会清空；但它会**从当前页面读一次明暗/密度并重放**（导航会把它们重置回思源配置）。状态文件只记页面身份（URL/前端/设备/视口），不再记明暗/密度。
 
 ## 设计
 
-引擎是 `playwright-core` 自带的 `cli`（daemon + 持久会话），本 CLI 只做三件事：
+引擎是 `playwright-core` 自带的 `cli`（daemon + 持久会话）。CLI 自己只负责：
 
-| 命令 | 实现 |
+| 层 | 职责 |
 |---|---|
-| `do click/hover/fill/press/...` | 直接转发原生命令 |
-| `read *`、`do menu/dock/attr/reset` | `cli --json eval` 跑页面 JS 片段 |
-| `audit` | `cli --json run-code`，整个计划一次执行 |
+| `scene.ts` | 场景定义与唯一展开（`--at` / `axes` / 截图文件名共用） |
+| `batch.ts` | 一次 `run-code` 跑完整个矩阵；页面按前端复用；截图直接落盘 |
+| `matrix.ts` | 唯一的矩阵渲染 |
+| `commands/*` | 参数校验、把命令编译成一个单步计划 |
 
-`open` 会起新 Chrome；会话按 Playwright 的 workspace（向上查找 `.playwright/`）隔离。同一 workspace 已有会话时不要重复 `open`（它会杀掉旧的），加载新产物用 `reload`。
-
-会话状态（入口 URL、前端、设备、视口、明暗、密度）记在 `.playwright/siyuan-devtools.json`，所以 `reload` / `audit` / `shot` 不带 `--url` 时会沿用 `open` 时的实例，`reload` 也会重放明暗与密度。
+页面规则只有一条：**每个前端一个页面**。`open` 建一个；需要别的前端时懒创建；`close` 全关。
 
 ## 环境变量
 

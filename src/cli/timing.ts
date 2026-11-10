@@ -26,13 +26,5 @@ export const ACTION_SETTLE_MS = settleMs(500);
 /** `--diff` 前把指针停到角落，等 hover 态退出。 */
 export const POINTER_PARK_MS = settleMs(120);
 
-/**
- * 切换 `data-theme-mode` / `data-ui-density` 后等主题 CSS 生效。
- *
- * `captureScript` 用它做截图前的落定等待。`reload` / `open` 的维度重放不需要
- * 额外的固定等待：`THEME_FN` 自己会等新样式表 `load` 完再返回。
- */
-export const THEME_SWITCH_MS = settleMs(200);
-
 /** 等思源前端启动的总超时。 */
 export const READY_TIMEOUT_MS = 15_000;

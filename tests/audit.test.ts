@@ -62,13 +62,13 @@ async function execute(plan: Plan): Promise<unknown> {
 
 describe('compilePlan 生成的脚本', () => {
   it('能解析成 async (page) 函数', () => {
-    const source = compilePlan({ frontend: 'desktop', steps: [{ read: 'env' }] });
+    const source = compilePlan({ at: 'desktop', steps: [{ read: 'env' }] });
     expect(() => new Function(`return (${source});`)).not.toThrow();
   });
 
   it('每一步产出结果，顺序与 step 序号一致', async () => {
     const results = (await execute({
-      frontend: 'desktop',
+      at: 'desktop',
       steps: [{ read: 'env' }, { do: 'hover:.item' }],
     })) as Array<{ step: number }>;
     expect(results.map((item) => item.step)).toEqual([0, 1]);
@@ -76,14 +76,14 @@ describe('compilePlan 生成的脚本', () => {
 
   it('hover / click 走 locator，不是页面内点击', async () => {
     const page = fakePage();
-    const script = compilePlan({ frontend: 'desktop', steps: [{ do: 'hover:.a' }, { do: 'click:.b' }] });
+    const script = compilePlan({ at: 'desktop', steps: [{ do: 'hover:.a' }, { do: 'click:.b' }] });
     await (new Function(`return (${script});`)() as (page: FakePage) => Promise<unknown>)(page);
     expect(page.calls).toEqual(['hover:.a', 'click:.b']);
   });
 
   it('menu 走页面内的 MENU_FN，而不是 locator', async () => {
     const page = fakePage();
-    const script = compilePlan({ frontend: 'desktop', steps: [{ do: 'menu:theme' }] });
+    const script = compilePlan({ at: 'desktop', steps: [{ do: 'menu:theme' }] });
     await (new Function(`return (${script});`)() as (page: FakePage) => Promise<unknown>)(page);
     expect(page.calls.some((call) => call.startsWith('evaluate:'))).toBe(true);
     expect(page.calls.some((call) => call.startsWith('click:'))).toBe(false);
@@ -91,27 +91,27 @@ describe('compilePlan 生成的脚本', () => {
 
   it('选择器里的冒号不会被动作名切分截断', async () => {
     const page = fakePage();
-    const script = compilePlan({ frontend: 'desktop', steps: [{ do: 'click:.a:hover' }] });
+    const script = compilePlan({ at: 'desktop', steps: [{ do: 'click:.a:hover' }] });
     await (new Function(`return (${script});`)() as (page: FakePage) => Promise<unknown>)(page);
     expect(page.calls).toEqual(['click:.a:hover']);
   });
 
   it('URL 选择器里的冒号同理', async () => {
     const page = fakePage();
-    const script = compilePlan({ frontend: 'desktop', steps: [{ do: 'hover:a[href="http://x"]' }] });
+    const script = compilePlan({ at: 'desktop', steps: [{ do: 'hover:a[href="http://x"]' }] });
     await (new Function(`return (${script});`)() as (page: FakePage) => Promise<unknown>)(page);
     expect(page.calls).toEqual(['hover:a[href="http://x"]']);
   });
 
   it('不认识的动作直接抛错，不默认成菜单', () => {
     // schema 会先拦住，但 compilePlan 是导出 API，不能有危险默认值。
-    expect(() => compilePlan({ frontend: 'desktop', steps: [{ do: 'teleport:.x' }] })).toThrow('不支持的动作');
-    expect(() => compilePlan({ frontend: 'desktop', steps: [{ do: 'click' }] })).toThrow('不支持的动作');
+    expect(() => compilePlan({ at: 'desktop', steps: [{ do: 'teleport:.x' }] })).toThrow('不支持的动作');
+    expect(() => compilePlan({ at: 'desktop', steps: [{ do: 'click' }] })).toThrow('不支持的动作');
   });
 
   it('diff 步骤产出 before/after', async () => {
     const results = (await execute({
-      frontend: 'desktop',
+      at: 'desktop',
       steps: [{ do: 'hover:.a', diff: { selector: '.a', props: ['color'] } }],
     })) as Array<{ value: unknown }>;
     expect(results[0]!.value).toEqual({ before: { color: 'red' }, after: { color: 'red' } });
@@ -119,7 +119,7 @@ describe('compilePlan 生成的脚本', () => {
 
   it('read element 不传 props 时用默认属性', async () => {
     const page = fakePage();
-    const script = compilePlan({ frontend: 'desktop', steps: [{ read: 'element', selector: '.x' }] });
+    const script = compilePlan({ at: 'desktop', steps: [{ read: 'element', selector: '.x' }] });
     await (new Function(`return (${script});`)() as (page: FakePage) => Promise<unknown>)(page);
     const evaluateCall = page.calls.find((call) => call.startsWith('evaluate:'));
     expect(evaluateCall).toBeDefined();
@@ -131,7 +131,7 @@ describe('runPlan 给 contrast 步骤补 ratio', () => {
     // runPlan 需要真实浏览器（runCode），这里直接验证后处理函数的效果：
     // 用 compilePlan 的脚本 + 假 page 走一遍，再补 ratio。
     const plan: Plan = {
-      frontend: 'desktop',
+      at: 'desktop',
       steps: [{ read: 'contrast', foreground: '#000', background: '#fff' }],
     };
     const script = compilePlan(plan);

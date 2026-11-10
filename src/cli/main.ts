@@ -127,11 +127,10 @@ export async function main(argv: string[]): Promise<void> {
   if (raw && command !== 'status') {
     throw new UserError(`--raw 只用于 status（当前命令：${command}）`);
   }
-  // --at 需要会话才能切换页面状态；`read contrast <字面量>` 与 install 不碰页面。
-  // 这里只拦「不可能有意义」的组合，具体校验交给 read/do 自己（它们更清楚
-  // 自己有没有页面可切）。
-  if (at !== null && (command === 'install' || command === 'open' || command === 'close' || command === 'reload')) {
-    throw new UserError(`--at 不能用于 ${command}（它改变的是页面状态，不是会话）`);
+  // `--at` 只对「纯测量」命令有意义：read 读矩阵、shot 截矩阵。
+  // 其它命令静默忽略会让人以为拿到了矩阵，所以直接报错。
+  if (at !== null && command !== 'read' && command !== 'shot') {
+    throw new UserError(`--at 只用于 read / shot（当前命令：${command}）；批量动作请写 audit 计划`);
   }
   setPretty(pretty);
 
@@ -152,7 +151,7 @@ export async function main(argv: string[]): Promise<void> {
       await read(args, json, at, url);
       return;
     case 'do':
-      await doAction(args, json, at, url);
+      await doAction(args, json);
       return;
     case 'audit':
       await audit(args, json, url);

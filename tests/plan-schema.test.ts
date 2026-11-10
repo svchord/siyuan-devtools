@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { parsePlan } from '../src/cli/script/plan-schema.ts';
 
 const VALID = {
-  frontend: 'desktop',
+  at: 'desktop',
   steps: [{ read: 'env' }, { do: 'hover:.b3-menu__item' }],
 };
 
@@ -22,8 +22,8 @@ describe('parsePlan', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('frontend 取值不对时报错', () => {
-    expect(firstError({ ...VALID, frontend: 'tablet' })).toContain('frontend');
+  it('at 不是字符串时报错', () => {
+    expect(firstError({ ...VALID, at: 1 })).toContain('at');
   });
 
   it('steps 不是数组时报错', () => {
@@ -69,7 +69,7 @@ describe('parsePlan', () => {
 
   it('一次给出全部问题，不用逐个试', () => {
     const result = parsePlan({
-      frontend: 'tablet',
+      at: 1,
       steps: [{ read: 'styles' }, { selector: '.x' }],
     });
     expect(result.ok).toBe(false);
@@ -166,12 +166,12 @@ describe('axes 与 shots', () => {
     expect(parsePlan({ axes: { theme: ['dark'] }, steps: [{ read: 'env' }] }).ok).toBe(true);
   });
 
-  it('frontend 与 axes.frontend 同时给时报错', () => {
-    expect(firstError({ ...WITH_AXES, frontend: 'desktop' })).toContain('不能同时给');
+  it('at 与 axes 同时给时报错', () => {
+    expect(firstError({ ...WITH_AXES, at: 'desktop' })).toContain('不能同时给');
   });
 
   it('两个都不给时报错', () => {
-    expect(firstError({ steps: [{ read: 'env' }] })).toContain('frontend 或 axes');
+    expect(firstError({ steps: [{ read: 'env' }] })).toContain('at 或 axes');
   });
 
   it('axes 取值不合法时报错', () => {

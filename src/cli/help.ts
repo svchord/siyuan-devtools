@@ -7,13 +7,13 @@ export const HELP = `siyuan-devtools — 思源主题/插件渲染测量
   siyuan-devtools status [--raw]   默认给测量状态：open/frontend/theme/density/url/viewport
   siyuan-devtools close
 
-读数
+读数（不带 --at：读当前页；带 --at：返回多场景矩阵）
   siyuan-devtools read env
   siyuan-devtools read tokens <name...>
   siyuan-devtools read element <selector> [--props a,b] [--box [--limit N]] [--meta]
   siyuan-devtools read contrast <fg> <bg>
 
-动作（click/hover/dblclick/fill/drag/select 支持 --diff a,b）
+动作（只作用于当前页；批量动作写 audit 计划）
   siyuan-devtools do click <selector> [--button left|right|middle] [--count 1|2]
   siyuan-devtools do hover <selector>
   siyuan-devtools do dblclick <selector>
@@ -28,17 +28,17 @@ export const HELP = `siyuan-devtools — 思源主题/插件渲染测量
   siyuan-devtools do reset
 
 批量 / 产物
-  siyuan-devtools audit <plan.json>          # 计划可带 axes，一次跑完所有模式
-  siyuan-devtools shot [--frontend both|desktop|mobile] [--theme light,dark] [--density default|compact] [--out shots]
+  siyuan-devtools shot [--at <场景>] [--out shots]   # 不带 --at 截当前页；带 --at 批量截图
+  siyuan-devtools audit <plan.json>                   # 计划里写 at/axes
 
-测量格（--at）
-  任何读数 / 动作都可以加 --at 指定模式，一条命令在多个模式下取值：
-  siyuan-devtools read tokens --brand-8 --at all
-  siyuan-devtools read element .b3-menu__item --props color --at desktop/dark
-  siyuan-devtools do hover .b3-menu__item --diff color --at desktop/dark/default
-  --at 取值：all | frontend[/theme[/density]]，逗号分隔多段。
+场景（--at）
+  取值：all | frontend[/theme[/density]][/键=值...]，逗号分隔多段。
   省略的段按该段全部取值展开（desktop = 4 格；desktop/dark = 2 格）。
-  移动端没有紧凑模式，mobile × compact 会被跳过并在 stderr 说明。
+  例：--at all
+      --at desktop/dark
+      --at desktop/dark/default/data-rc-style=fluent
+  带 --at 时：当前前端用你正在交互的那一页（跑完属性设回去，交互态不丢），
+  其它前端懒创建测量页并复用。移动端没有紧凑模式，mobile × compact 会被跳过。
 
 选项细节
   read element 默认给 found/count/visible/styles（--box 加 boxes），--meta 才带 tag/className。
@@ -50,7 +50,7 @@ export const HELP = `siyuan-devtools — 思源主题/插件渲染测量
   siyuan-devtools --help
 
 全局选项：--json（紧凑结构化输出）、--pretty（缩进 JSON，隐含 --json）、
---raw（只用于 status）、--at <格>（在指定模式上测量）、--url <前端 URL>
+--raw（只用于 status）、--at <场景>（多场景测量）、--url <前端 URL>
 （默认沿用 open 时的 URL，否则按 SIYUAN_PORT 或 6806 拼）。
 -- 之后的参数一律按字面量处理，例如 siyuan-devtools do fill '#inp' -- --json
 `;
