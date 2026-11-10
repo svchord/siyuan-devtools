@@ -1,0 +1,2 @@
+# Shell 钩子必须保持 LF：core.autocrlf 下若检出为 CRLF，Git Bash 会解析失败。
+.husky/* text eol=lf

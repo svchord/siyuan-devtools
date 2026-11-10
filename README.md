@@ -146,6 +146,11 @@ siyuan-devtools do fill '#inp' -- --json     # 把字面量 "--json" 输入到�
    - `feat!: ...` → 1.0 之前只升次版本
    - `docs:` / `chore:` / `ci:` / `test:` / `refactor:` → 不发版
 2. 合并方式固定为 **Squash and merge**，PR 标题会成为最终 commit。
+3. 本地提交同样受约束：`pnpm install` 会通过 `prepare` 安装 husky 钩子，
+   `commit-msg` 用 commitlint 校验单条消息，`pre-push` 校验本次推送新增的提交，
+   规则见 `commitlint.config.js`。绕过钩子（`git commit --no-verify`）产生的提交
+   会在 push 时被拦下；确实要绕过时用 `git push --no-verify`，并自行确认该提交
+   不会进入 CHANGELOG。
 
 ### 发布流程
 

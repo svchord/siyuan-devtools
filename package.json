@@ -28,7 +28,9 @@
     "prepack": "pnpm run build",
     "type-check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "check": "pnpm run type-check && pnpm run test"
+    "check": "pnpm run type-check && pnpm run test",
+    "prepare": "husky",
+    "commitlint": "commitlint --from origin/main --to HEAD --verbose"
   },
   "dependencies": {
     "commander": "^15.1.0",
@@ -36,7 +38,10 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
     "@types/node": "^22.20.5",
+    "husky": "^9.1.7",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   },
