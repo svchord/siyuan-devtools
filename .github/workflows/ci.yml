@@ -76,5 +76,8 @@ jobs:
           npm init -y > /dev/null
           npm install "$RUNNER_TEMP/$pkg" --no-audit --no-fund > /dev/null
           # status 不需要浏览器，但会走 cliPath() 定位 playwright-core cli。
-          # 定位失败会以退出码 2 报「找不到 playwright-core」。
+          # 注意：没有 .playwright 目录时 sessionExists() 直接返回 false，
+          # 根本不会 spawn playwright-cli —— 那样这条冒烟就测不到 cliPath()。
+          # 先建出 workspace 标记，才会真的走到定位逻辑。
+          mkdir -p .playwright
           node node_modules/siyuan-devtools/dist/cli.js status --json

@@ -14,7 +14,7 @@
  * 页面返回 `undefined` 时它会是字面量 `"undefined"`，这里统一折成 null。
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -22,15 +22,16 @@ import { firstLine, UserError } from './errors.ts';
 import { isRecord } from './util.ts';
 
 /**
- * 找到 playwright-core 自带的 cli.js。
+ * 找到 playwright-core 自带的 CLI 入口。
  *
  * 不能直接 `resolve('playwright-core/cli.js')`：playwright-core 的 `exports`
  * 没有导出 `./cli.js`，会报 ERR_PACKAGE_PATH_NOT_EXPORTED。开发仓库里之所以
  * 看起来能用，是因为包根目录恰好就是 node_modules/playwright-core —— 装成
  * 依赖后那条路径根本不存在。
  *
- * 唯一稳定做法：解析被允许导出的 `playwright-core/package.json`，再从它旁边
- * 取 `cli.js`。这样不管装在 node_modules 还是 pnpm 的 .pnpm 链接里都对。
+ * 稳定做法：解析被允许导出的 `playwright-core/package.json`，读它的 `bin`
+ * 字段拿到入口文件名（当前是 `cli.js`，但不要写死——上游改名时这里跟着走）。
+ * `bin` 是 npm 的公开契约，`node_modules/.bin/playwright-core` 就是按它生成的。
  */
 export function cliPath(): string {
   const candidates = [
@@ -41,7 +42,14 @@ export function cliPath(): string {
   ];
   for (const resolve of candidates) {
     try {
-      const cli = join(dirname(resolve()), 'cli.js');
+      const packageJsonPath = resolve();
+      const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as {
+        bin?: string | Record<string, string>;
+      };
+      const bin =
+        typeof packageJson.bin === 'string' ? packageJson.bin : packageJson.bin?.['playwright-core'];
+      if (!bin) continue;
+      const cli = join(dirname(packageJsonPath), bin);
       if (existsSync(cli)) return cli;
     } catch {
       // 换下一个
