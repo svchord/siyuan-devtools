@@ -139,7 +139,8 @@ export function buildBatchScript(
   const pages = {};
   const targetErrors = {};
   const isLive = {};
-  const fresh = new Set();  for (const fe of Object.keys(TARGETS)) {
+  const fresh = new Set();
+  for (const fe of Object.keys(TARGETS)) {
     if (POLICY === 'live-first' && fe === liveFrontend) {
       pages[fe] = live;
       isLive[fe] = true;
@@ -384,17 +385,6 @@ export function runBatch(options: BatchOptions): BatchResult {
     readings: Array.isArray(record.readings) ? (record.readings as BatchReading[]) : [],
     shots: Array.isArray(record.shots) ? (record.shots as BatchShot[]) : [],
   };
-}
-
-/** 把 `read --at` 的读数解成单值矩阵。 */
-export function singleStepValues(result: BatchResult): { at: string; value: unknown; error?: string }[] {
-  return result.readings.map((reading) => {
-    if (reading.error !== undefined) return { at: reading.at, value: null, error: reading.error };
-    const steps = reading.value;
-    if (!Array.isArray(steps) || steps.length === 0) return { at: reading.at, value: null };
-    const first = steps[0] as { value?: unknown };
-    return { at: reading.at, value: first.value ?? null };
-  });
 }
 
 /** 截图当前 live 页（不导航、不改状态）。 */

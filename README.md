@@ -72,11 +72,11 @@ siyuan-devtools read tokens --brand-8 --at desktop/dark/default/data-rc-style=fl
 
 ```json
 {
-  "at": "all",
+  "at": "desktop",
   "steps": [
-    { "do": "menu:theme" },
-    { "read": "tokens", "names": ["--brand-8", "--rc-text-primary"] },
-    { "read": "contrast", "foreground": "--rc-text-primary", "background": "--rc-bg-page" }
+    { "do": "click:.dock__item[data-type=file]" },
+    { "read": "element", "selector": ".dock__item[data-type=file]", "props": ["background-color", "width", "height"] },
+    { "read": "contrast", "foreground": "--b3-theme-on-background", "background": "--b3-theme-background" }
   ],
   "shots": { "out": "shots" }
 }
@@ -86,7 +86,11 @@ siyuan-devtools read tokens --brand-8 --at desktop/dark/default/data-rc-style=fl
 siyuan-devtools audit plan.json
 ```
 
+计划里的 `do` 只支持 `hover:<selector>`、`click:<selector>`、`menu:<id>` 三种；其余动作只能在命令行上单独跑。
+
 `audit` 用**独立的测量页**（`measure-only`）：计划里的 `do` 会改动页面，每格开始前 reload，所以不会碰你的交互页。纯读数的计划也走同一条路径，保证结果可复现。`axes` 是 `at` 的结构化写法，额外轴写在 `axes.attrs` 里。
+
+跨前端（`at: all`）时选择器必须在两个前端都存在，否则那个前端的格会记进 `errors`。
 
 ## 工作流
 

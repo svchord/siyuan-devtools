@@ -73,21 +73,6 @@ export function parseDimension<F extends DimensionFlag>(
   return raw as never;
 }
 
-/** 解析逗号分隔的多值，逐项校验并去重。 */
-export function parseDimensionList<F extends DimensionFlag>(
-  flag: F,
-  raw: string | undefined
-): (F extends '--theme' ? ThemeMode : Density)[] | null {
-  if (raw === undefined) return null;
-  const values: string[] = [];
-  for (const part of raw.split(',')) {
-    const value = parseDimension(flag, part.trim());
-    if (value === null) continue;
-    if (!values.includes(value)) values.push(value);
-  }
-  return values as never;
-}
-
 /** 移动端没有紧凑模式，这是上游限制，不是本工具的取舍。 */
 export function sceneExists(frontend: Frontend, density: Density): boolean {
   return !(frontend === 'mobile' && density === 'compact');
@@ -265,22 +250,4 @@ export function expandAxes(axes: SceneAxes): SceneSpec {
     throw new UserError(`axes 没有展开出任何场景：${skipped.join('；') || '轴向组合为空'}`);
   }
   return { scenes, skipped };
-}
-
-/** 按前端分组，保持输入顺序。 */
-export function groupByFrontend(scenes: readonly Scene[]): Map<Frontend, Scene[]> {
-  const groups = new Map<Frontend, Scene[]>();
-  for (const scene of scenes) {
-    const list = groups.get(scene.frontend);
-    if (list) list.push(scene);
-    else groups.set(scene.frontend, [scene]);
-  }
-  return groups;
-}
-
-/** 场景里出现的所有附加属性名。 */
-export function attrNames(scenes: readonly Scene[]): string[] {
-  const names = new Set<string>();
-  for (const scene of scenes) for (const name of Object.keys(scene.attrs)) names.add(name);
-  return [...names];
 }
